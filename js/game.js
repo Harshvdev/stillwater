@@ -190,7 +190,7 @@ export function update(dt, spreadFlowerFn) {
   if (ns !== state.curSeason) {
     state.curSeason = ns;
     entities.forEach((e) => {
-      if (e.t === ET.TREE) retex(e);
+      if (e.t === ET.TREE || e.t === ET.HERO_TREE) retex(e);
     });
   }
 
@@ -290,8 +290,8 @@ export function update(dt, spreadFlowerFn) {
       const r = regrow[k];
       if (r.at <= Date.now()) {
         const p = k.split(','), x = +p[0], y = +p[1];
-        if (!entities.some((en) => Math.floor(en.x) === x && Math.floor(en.y) === y && (en.t === ET.TREE || en.t === ET.FLOWER || en.t === ET.STONE || en.t === ET.MUSH || en.t === ET.GLOW))) {
-          addEntity({ t: r.t, x: x + 0.5, y: y + 0.5, ly: r.t === ET.FLOWER || r.t === ET.MUSH || r.t === ET.GLOW ? 0 : 4, data: r.d || {} });
+        if (!entities.some((en) => Math.floor(en.x) === x && Math.floor(en.y) === y && (en.t === ET.TREE || en.t === ET.HERO_TREE || en.t === ET.FLOWER || en.t === ET.STONE || en.t === ET.MUSH || en.t === ET.GLOW))) {
+          addEntity({ t: r.t, x: x + 0.5, y: y + 0.5, ly: r.t === ET.FLOWER || r.t === ET.MUSH || r.t === ET.GLOW || r.t === ET.DRIFTWOOD ? 0 : 4, data: r.d || {} });
         }
         delete regrow[k];
       }
@@ -403,74 +403,87 @@ export function update(dt, spreadFlowerFn) {
     shdG.clear();
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      const H = WH[e.t] || 10;
-      const hGrid = H / 22.0;
-
-      const dGx = Math.cos(shadowAngle) * L * hGrid;
-      const dGy = Math.sin(shadowAngle) * L * hGrid;
-
       const base = iso(e.x, e.y);
-      const tip = iso(e.x + dGx, e.y + dGy);
 
-      if (e.t === ET.TREE) {
-        const mid = iso(e.x + dGx * 0.35, e.y + dGy * 0.35);
-        const rX = Math.max(7, 14 * clamp(L * 0.42, 0.7, 2.0));
-        const rY = Math.max(4.5, 9 * clamp(L * 0.42, 0.7, 2.0));
+      // Height of entity in screen units
+      const H = WH[e.t] || 12;
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.32);
-        shdG.drawEllipse(tip.x, tip.y, rX * 1.25, rY * 1.25);
+      // Shadow projection vector on isometric ground plane
+      const len = H * L * 0.32;
+      const tipX = base.x + Math.cos(shadowAngle) * len;
+      const tipY = base.y + Math.sin(shadowAngle) * len * 0.5;
+
+      if (e.t === ET.TREE || e.t === ET.HERO_TREE) {
+        const isHero = e.t === ET.HERO_TREE;
+        const trunkW = isHero ? 4.5 : 2.5;
+
+        const rX = Math.max(7, (isHero ? 18 : 12) * clamp(L * 0.42, 0.7, 1.8));
+        const rY = Math.max(4, (isHero ? 10 : 6.5) * clamp(L * 0.42, 0.7, 1.8));
+
+        // 1. Solid Ground Contact Shadow directly at base of trunk
+        shdG.beginFill(shadowCol, baseAlpha * 0.80);
+        shdG.drawEllipse(base.x, base.y, trunkW * 1.8, trunkW * 0.9);
+        shdG.endFill();
+
+        // 2. Trunk shadow trapezoid connecting trunk base to canopy shadow tip
+        shdG.beginFill(shadowCol, baseAlpha * 0.65);
         shdG.drawPolygon([
-          base.x - 3, base.y,
-          base.x + 3, base.y,
-          tip.x + rX * 0.5, tip.y,
-          tip.x - rX * 0.5, tip.y
+          base.x - trunkW, base.y,
+          base.x + trunkW, base.y,
+          tipX + trunkW * 0.6, tipY,
+          tipX - trunkW * 0.6, tipY
         ]);
         shdG.endFill();
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.68);
-        shdG.drawEllipse(tip.x, tip.y, rX, rY);
-        shdG.drawPolygon([
-          base.x - 1.5, base.y,
-          base.x + 1.5, base.y,
-          mid.x + rX * 0.3, mid.y,
-          mid.x - rX * 0.3, mid.y
-        ]);
+        // 3. Soft Outer Canopy Shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.35);
+        shdG.drawEllipse(tipX, tipY, rX * 1.2, rY * 1.2);
+        shdG.endFill();
+
+        // 4. Inner Dark Canopy Shadow Core
+        shdG.beginFill(shadowCol, baseAlpha * 0.65);
+        shdG.drawEllipse(tipX, tipY, rX, rY);
         shdG.endFill();
       } else if (e.t === ET.PLAYER || e.t === ET.FOX || e.t === ET.RABBIT) {
-        const rad = (e.t === ET.PLAYER ? 6 : e.t === ET.FOX ? 7 : 4);
-        const charTip = iso(e.x + dGx * 0.65, e.y + dGy * 0.65);
+        const rad = (e.t === ET.PLAYER ? 5.5 : e.t === ET.FOX ? 6.5 : 3.5);
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.4);
-        shdG.drawEllipse(base.x, base.y, rad * 1.1, rad * 0.55);
-        shdG.drawEllipse(charTip.x, charTip.y, rad * 0.95, rad * 0.5);
+        // Ground contact shadow at feet
+        shdG.beginFill(shadowCol, baseAlpha * 0.85);
+        shdG.drawEllipse(base.x, base.y, rad * 1.2, rad * 0.6);
+        shdG.endFill();
+
+        // Cast body shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.55);
         shdG.drawPolygon([
           base.x - rad * 0.8, base.y,
           base.x + rad * 0.8, base.y,
-          charTip.x + rad * 0.7, charTip.y,
-          charTip.x - rad * 0.7, charTip.y
+          tipX + rad * 0.6, tipY,
+          tipX - rad * 0.6, tipY
         ]);
+        shdG.drawEllipse(tipX, tipY, rad * 0.9, rad * 0.45);
+        shdG.endFill();
+      } else if (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.STUMP || e.t === ET.DRIFTWOOD) {
+        const w = e.t === ET.RUIN ? 9 : e.t === ET.STONE ? 6.5 : e.t === ET.DRIFTWOOD ? 6 : 4.5;
+
+        // Ground contact shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.85);
+        shdG.drawEllipse(base.x, base.y, w * 1.2, w * 0.6);
         shdG.endFill();
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.6);
-        shdG.drawEllipse((base.x + charTip.x) * 0.5, (base.y + charTip.y) * 0.5, rad * 0.85, rad * 0.45);
-        shdG.endFill();
-      } else if (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.STUMP) {
-        const stoneTip = iso(e.x + dGx * 0.8, e.y + dGy * 0.8);
-        const w = e.t === ET.RUIN ? 10 : e.t === ET.STONE ? 7 : 5;
-
-        shdG.beginFill(shadowCol, baseAlpha * 0.48);
+        // Cast shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.50);
         shdG.drawPolygon([
           base.x - w, base.y,
           base.x + w, base.y,
-          stoneTip.x + w * 0.75, stoneTip.y,
-          stoneTip.x - w * 0.75, stoneTip.y
+          tipX + w * 0.75, tipY,
+          tipX - w * 0.75, tipY
         ]);
-        shdG.drawEllipse(stoneTip.x, stoneTip.y, w * 0.8, w * 0.42);
+        shdG.drawEllipse(tipX, tipY, w * 0.85, w * 0.42);
         shdG.endFill();
       } else {
-        const itemTip = iso(e.x + dGx * 0.45, e.y + dGy * 0.45);
-        shdG.beginFill(shadowCol, baseAlpha * 0.35);
-        shdG.drawEllipse(itemTip.x, itemTip.y, 4.5, 2.3);
+        // Small items (flowers, mushrooms, reeds, glow)
+        shdG.beginFill(shadowCol, baseAlpha * 0.45);
+        shdG.drawEllipse(base.x, base.y, 4.0, 2.0);
         shdG.endFill();
       }
     }

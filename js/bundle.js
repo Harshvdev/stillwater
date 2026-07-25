@@ -22,6 +22,8 @@ const ET = {
   RUIN: 7,
   REED: 8,
   GLOW: 9,
+  DRIFTWOOD: 10,
+  HERO_TREE: 11,
   FOX: 12,
   RABBIT: 13,
   PLAYER: 14
@@ -58,6 +60,8 @@ const WH = {
   7: 17,
   8: 13,
   9: 11,
+  10: 12,
+  11: 46,
   12: 13,
   13: 10,
   14: 17
@@ -508,6 +512,61 @@ function dRabbit(x) {
   disc(x, 12.4, 6.6, 0.75, 'rgb(66,46,36)');
 }
 
+function dDriftwood(x) {
+  shd(x, 10, 12, 7.5, 2.2);
+  soft(x, 10, 9.5, 7.2, 2.8, 'rgb(148,132,112)');
+  soft(x, 9, 8.5, 5.5, 2.0, 'rgb(178,162,140)');
+  soft(x, 14, 9, 2.2, 1.6, 'rgb(120,105,88)');
+  x.strokeStyle = 'rgba(88,72,56,0.6)';
+  x.lineWidth = 1;
+  x.beginPath();
+  x.moveTo(4, 9.5);
+  x.lineTo(15, 9);
+  x.moveTo(6, 8.2);
+  x.lineTo(12, 8.0);
+  x.stroke();
+  disc(x, 11, 8.8, 0.8, 'rgb(95,80,64)');
+}
+
+function dHeroTree(x, fol, hi, extra) {
+  // Single, solid, majestic trunk
+  x.fillStyle = 'rgb(76,52,34)';
+  x.beginPath();
+  x.moveTo(13, 42); // left root flare
+  x.lineTo(15.5, 20); // left top near canopy
+  x.lineTo(20.5, 20); // right top near canopy
+  x.lineTo(23, 42); // right root flare
+  x.closePath();
+  x.fill();
+
+  // Root flares & bark texture shading
+  soft(x, 13.5, 41.5, 3.2, 1.8, 'rgb(58,38,22)');
+  soft(x, 22.5, 41.5, 3.2, 1.8, 'rgb(58,38,22)');
+  soft(x, 17, 30, 2.2, 9, 'rgb(98,72,48)');
+
+  // Main grand canopy layers
+  soft(x, 18, 17, 15.5, 13.5, rgb(fol));
+  soft(x, 12, 13, 8.5, 7.8, rgb(hi));
+  soft(x, 24, 14, 8, 7.5, rgb(hi));
+  soft(x, 18, 8.5, 7.5, 6.5, rgba([255, 255, 255, 0.22], 1));
+  soft(x, 23, 22, 7.5, 6.8, rgba([10, 36, 18, 0.5], 1));
+
+  if (extra === 'blossom') {
+    for (let i = 0; i < 11; i++) {
+      const a = i * 1.5, hh = h2(i * 4.1, i * 2.3);
+      soft(x, 12 + Math.cos(a) * 8 + hh * 3, 13 + Math.sin(a) * 6, 2.0, 2.0, 'rgba(255,215,230,0.9)');
+    }
+  } else if (extra === 'snow') {
+    soft(x, 16, 8, 10, 4.2, 'rgba(244,248,255,0.95)');
+    soft(x, 22, 12, 6, 3, 'rgba(244,248,255,0.85)');
+  } else if (extra === 'autumn') {
+    for (let i = 0; i < 9; i++) {
+      const a = i * 1.9;
+      soft(x, 15 + Math.cos(a) * 8, 15 + Math.sin(a) * 6, 2.1, 2.1, 'rgba(224,106,58,0.75)');
+    }
+  }
+}
+
 function dDot(x) {
   soft(x, 4, 4, 3.6, 3.6, 'rgb(255,255,255)');
 }
@@ -518,6 +577,11 @@ function buildSprites() {
   CV.tree1 = paintSprite(28, 32, (x) => dTree(x, [78, 146, 82], [150, 206, 138], null));
   CV.tree2 = paintSprite(28, 32, (x) => dTree(x, [186, 128, 64], [224, 176, 110], 'autumn'));
   CV.tree3 = paintSprite(28, 32, (x) => dTree(x, [120, 134, 142], [176, 188, 196], 'snow'));
+  CV.heroTree0 = paintSprite(36, 44, (x) => dHeroTree(x, [82, 140, 92], [150, 200, 140], 'blossom'));
+  CV.heroTree1 = paintSprite(36, 44, (x) => dHeroTree(x, [78, 146, 82], [150, 206, 138], null));
+  CV.heroTree2 = paintSprite(36, 44, (x) => dHeroTree(x, [186, 128, 64], [224, 176, 110], 'autumn'));
+  CV.heroTree3 = paintSprite(36, 44, (x) => dHeroTree(x, [120, 134, 142], [176, 188, 196], 'snow'));
+  CV.driftwood = paintSprite(20, 14, dDriftwood);
   for (let c = 0; c < 5; c++) CV['flower' + c] = paintSprite(14, 14, (x) => dFlower(x, FC[c]));
   CV.glow = paintSprite(14, 14, dGlow);
   CV.stump = paintSprite(14, 14, dStump);
@@ -543,6 +607,10 @@ function texFor(e, curSeasonIdx = state.curSeason) {
   switch (e.t) {
     case ET.TREE:
       return TEX['tree' + curSeasonIdx];
+    case ET.HERO_TREE:
+      return TEX['heroTree' + curSeasonIdx];
+    case ET.DRIFTWOOD:
+      return TEX.driftwood;
     case ET.FLOWER:
       return TEX['flower' + ((e.data.c || 0) % 5)];
     case ET.GLOW:
@@ -870,12 +938,29 @@ function setPlayer(p) {
   player = p;
 }
 function genWorld() {
+  // 1. Terrain Pass (Landmass, Shoreline Notch for East Glint, Inland Pond)
   for (let y = 0; y < GRID; y++) {
     for (let x = 0; x < GRID; x++) {
       const dx = (x - C) / (GRID * 0.46);
       const dy = (y - C) / (GRID * 0.46);
-      const d = Math.sqrt(dx * dx + dy * dy);
-      let e = fbm(x * 0.045 + 7.3, y * 0.045 + 3.1) * 0.75 + (1 - d) * 0.64 - 0.18 + (h2(x, y) - 0.5) * 0.06;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // East shore notch: brings shoreline close to C on UP-RIGHT screen (increasing x, decreasing y)
+      const eastShoreDist = Math.hypot((x - (C + 14)) / 5, (y - (C - 6)) / 8);
+      const eastShoreNotch = Math.exp(-eastShoreDist * eastShoreDist) * 0.36;
+
+      let e = fbm(x * 0.045 + 7.3, y * 0.045 + 3.1) * 0.65 + (1 - dist) * 0.65 - eastShoreNotch - 0.16;
+
+      // Inland Serene Pond at NW (x = C - 14, y = C - 14)
+      const pdx = (x - (C - 14)) / 4.0;
+      const pdy = (y - (C - 14)) / 3.0;
+      const pondDist = Math.sqrt(pdx * pdx + pdy * pdy);
+      if (pondDist < 1.0) {
+        e = 0.32; // Inland water
+      } else if (pondDist < 1.4) {
+        e = 0.44; // Pond beach sand
+      }
+
       let t;
       if (e < 0.40) t = TL.WATER;
       else if (e < 0.47) t = TL.SAND;
@@ -884,13 +969,67 @@ function genWorld() {
     }
   }
 
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
+  // Ensure coastal sand transition along water edges
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
       const idx = gi(x, y);
       if (tiles[idx] === TL.GRASS) {
-        const p1 = Math.abs(fbm(x * 0.055 + 14.2, y * 0.055 + 83.1) - 0.5);
-        const p2 = Math.abs(fbm(x * 0.04 + 31.7, y * 0.04 + 19.4) - 0.5);
-        if ((p1 < 0.024 || p2 < 0.02) && h2(x * 3.3, y * 2.7) < 0.75) {
+        let hasWater = false;
+        for (let oy = -1; oy <= 1 && !hasWater; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            if (tiles[gi(x + ox, y + oy)] === TL.WATER) hasWater = true;
+          }
+        }
+        if (hasWater) tiles[idx] = TL.SAND;
+      }
+    }
+  }
+
+  // Force Spawn Clearing (radius 7 around C, C) to be 100% pure GRASS
+  for (let y = C - 7; y <= C + 7; y++) {
+    for (let x = C - 7; x <= C + 7; x++) {
+      if (inB(x, y) && Math.hypot(x - C, y - C) <= 7.5) {
+        tiles[gi(x, y)] = TL.GRASS;
+      }
+    }
+  }
+
+  // 2. Authored Feature Dirt Floor Masks
+  // Thicket centers (with dark dirt under canopy)
+  const thickets = [
+    { cx: C - 9, cy: C + 6, r: 7 },   // Down-Left Framing Grove
+    { cx: C + 16, cy: C + 12, r: 8 }, // Down-Right Deep Forest
+    { cx: C - 15, cy: C - 10, r: 8 }  // Up-Left Woods
+  ];
+
+  // Rocky Outcrop centers
+  const rocks = [
+    { cx: C + 8, cy: C - 16, r: 6 },  // Up-Right Ridge
+    { cx: C - 18, cy: C + 2, r: 6 }   // Far West Crag
+  ];
+
+  // Flower Meadow center (hard edge, placed down-right distantly)
+  const meadow = { cx: C + 12, cy: C + 14, r: 6.5 };
+
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
+      const idx = gi(x, y);
+      if (tiles[idx] !== TL.GRASS) continue;
+
+      // Keep spawn clearing clean
+      if (Math.hypot(x - C, y - C) <= 7.5) continue;
+
+      // Thicket dirt interior
+      for (const th of thickets) {
+        const d = Math.hypot(x - th.cx, y - th.cy);
+        if (d < th.r * 0.65 && h2(x * 2.7, y * 3.1) < 0.85) {
+          tiles[idx] = TL.DIRT;
+        }
+      }
+      // Rocky outcrop dirt paths
+      for (const rk of rocks) {
+        const d = Math.hypot(x - rk.cx, y - rk.cy);
+        if (d < rk.r && h2(x * 1.9, y * 2.3) < 0.7) {
           tiles[idx] = TL.DIRT;
         }
       }
@@ -898,62 +1037,131 @@ function genWorld() {
   }
 
   entities = [];
+
+  const placed = new Set();
+  const canPlace = (tx, ty) => {
+    if (!inB(tx, ty)) return false;
+    const k = tx + ',' + ty;
+    if (placed.has(k)) return false;
+    // Strictly keep spawn clearing (radius 6 around C, C) empty for breathing room
+    if (Math.hypot(tx - C, ty - C) < 6.2) return false;
+    return true;
+  };
+  const put = (e) => {
+    const tx = Math.floor(e.x), ty = Math.floor(e.y);
+    placed.add(tx + ',' + ty);
+    entities.push(e);
+  };
+
+  // 3. Populate Authored Feature Clusters
+
+  // A. Forest Thickets (Trees, Shaded Dirt, Mushrooms inside)
   for (let y = 1; y < GRID - 1; y++) {
     for (let x = 1; x < GRID - 1; x++) {
-      const t = tiles[gi(x, y)], r = h2(x * 3.7 + 11, y * 3.7 + 5);
-      if (t === TL.GRASS || t === TL.DIRT) {
-        const tr = fbm(x * 0.09 + 77, y * 0.09 + 31);
-        if (tr > 0.66 && r < 0.72) {
-          entities.push({ t: ET.TREE, x: x + 0.5, y: y + 0.5, ly: 4, data: { v: (r * 4) | 0 } });
-          if (h2(x * 4.1, y * 5.3) < 0.7) tiles[gi(x, y)] = TL.DIRT;
-        } else if (r > 0.972) {
-          entities.push({ t: ET.GLOW, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
-        } else if (r > 0.956) {
-          entities.push({ t: ET.FLOWER, x: x + 0.5, y: y + 0.5, ly: 0, data: { c: (h2(x + 9, y + 3) * 5) | 0, moist: 1 } });
-        } else if (r > 0.92) {
-          entities.push({ t: ET.STONE, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
-          if (h2(x * 2.9, y * 1.7) < 0.6) tiles[gi(x, y)] = TL.DIRT;
-        } else if (r > 0.905) {
-          entities.push({ t: ET.MUSH, x: x + 0.5, y: y + 0.5, ly: 0, data: { v: (r * 2) | 0 } });
+      if (!canPlace(x, y)) continue;
+      const t = tiles[gi(x, y)];
+      if (t !== TL.GRASS && t !== TL.DIRT) continue;
+
+      for (const th of thickets) {
+        const d = Math.hypot(x - th.cx, y - th.cy);
+        if (d < th.r) {
+          const edgeF = 1 - d / th.r;
+          const rnd = h2(x * 4.1 + 13, y * 3.9 + 7);
+          if (rnd < edgeF * 0.88) {
+            put({ t: ET.TREE, x: x + 0.5, y: y + 0.5, ly: 4, data: { v: (rnd * 4) | 0 } });
+          } else if (rnd > 0.85 && d < th.r * 0.65) {
+            put({ t: ET.MUSH, x: x + 0.5, y: y + 0.5, ly: 0, data: { v: (rnd * 2) | 0 } });
+          }
         }
-      } else if (t === TL.SAND) {
-        let w = false;
-        for (let oy = -1; oy <= 1 && !w; oy++) {
+      }
+    }
+  }
+
+  // B. Flower Meadow (Dense multi-colored flowers with sharp, hard edge)
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
+      if (!canPlace(x, y)) continue;
+      if (tiles[gi(x, y)] !== TL.GRASS) continue;
+
+      const d = Math.hypot(x - meadow.cx, y - meadow.cy);
+      if (d <= meadow.r) {
+        const rnd = h2(x * 5.3 + 9, y * 4.7 + 11);
+        if (rnd < 0.70) {
+          const col = ((h2(x + 17, y + 23) * 5) | 0);
+          put({ t: ET.FLOWER, x: x + 0.5, y: y + 0.5, ly: 0, data: { c: col, moist: 1 } });
+        }
+      }
+    }
+  }
+
+  // C. Rocky Outcrops
+  for (const rk of rocks) {
+    for (let y = Math.floor(rk.cy - rk.r); y <= Math.ceil(rk.cy + rk.r); y++) {
+      for (let x = Math.floor(rk.cx - rk.r); x <= Math.ceil(rk.cx + rk.r); x++) {
+        if (!canPlace(x, y)) continue;
+        const t = tiles[gi(x, y)];
+        if (t !== TL.GRASS && t !== TL.DIRT) continue;
+        const d = Math.hypot(x - rk.cx, y - rk.cy);
+        if (d <= rk.r) {
+          const rnd = h2(x * 3.3 + 2.1, y * 3.3 + 5.7);
+          if (rnd > 0.70) {
+            put({ t: ET.STONE, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
+          } else if (rnd < 0.14 && d < 3.5) {
+            put({ t: ET.RUIN, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
+          }
+        }
+      }
+    }
+  }
+
+  // D. Beach with Driftwood & Reeds
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
+      if (!canPlace(x, y)) continue;
+      const t = tiles[gi(x, y)];
+      if (t === TL.SAND) {
+        let nearWater = false;
+        for (let oy = -1; oy <= 1 && !nearWater; oy++) {
           for (let ox = -1; ox <= 1; ox++) {
             if (inB(x + ox, y + oy) && tiles[gi(x + ox, y + oy)] === TL.WATER) {
-              w = true;
-              break;
+              nearWater = true;
             }
           }
         }
-        if (w && r > 0.85) entities.push({ t: ET.REED, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        const rnd = h2(x * 2.9 + 17, y * 3.1 + 3);
+        if (nearWater && rnd > 0.75) {
+          put({ t: ET.REED, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        } else if (rnd > 0.93) {
+          put({ t: ET.DRIFTWOOD, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        }
       }
     }
   }
 
-  for (let y = C - 3; y <= C + 3; y++) {
-    for (let x = C - 3; x <= C + 3; x++) {
-      if ((x - C) * (x - C) + (y - C) * (y - C) <= 12) {
-        entities = entities.filter((e) => !(Math.floor(e.x) === x && Math.floor(e.y) === y));
-      }
-    }
-  }
+  // 4. Composed Starting View Postcard Setup around Spawn (C, C)
+  // Ensure strict radius 5.5 is clear of any entities
+  entities = entities.filter((e) => Math.hypot(e.x - C, e.y - C) > 5.5);
 
-  [[C - 3, C - 2], [C + 3, C - 1], [C - 1, C + 3], [C + 2, C - 3]].forEach((p) => {
-    entities.push({ t: ET.RUIN, x: p[0] + 0.5, y: p[1] + 0.5, ly: 4, data: {} });
-    tiles[gi(p[0], p[1])] = TL.DIRT;
-  });
-  entities.push({ t: ET.STONE, x: C + 1.5, y: C + 1.5, ly: 4, data: {} });
-  entities.push({ t: ET.STONE, x: C - 2.5, y: C + 0.5, ly: 4, data: {} });
-  entities.push({ t: ET.FLOWER, x: C + 2.5, y: C + 2.5, ly: 0, data: { c: 0, moist: 1 } });
-  entities.push({ t: ET.FLOWER, x: C - 2.5, y: C - 2.5, ly: 0, data: { c: 2, moist: 1 } });
-  entities.push({ t: ET.GLOW, x: C + 3.5, y: C - 1.5, ly: 0, data: {} });
-  entities.push({ t: ET.GLOW, x: C - 3.5, y: C + 2.5, ly: 0, data: {} });
-  entities.push({ t: ET.FOX, x: C + 6.5, y: C - 5.5, ly: 6, data: { trust: 0, state: 'wary', home: [C + 6.5, C - 5.5], wt: 0, dir: 0 } });
-  entities.push({ t: ET.RABBIT, x: C - 6.5, y: C + 4.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
-  entities.push({ t: ET.RABBIT, x: C + 5.5, y: C + 6.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
+  // A. Hero Tree framing top-left of spawn clearing
+  put({ t: ET.HERO_TREE, x: C - 4.5, y: C - 3.5, ly: 4, data: {} });
+
+  // B. Knot of Glow-Flowers waiting for night framing bottom-left of hero tree
+  put({ t: ET.GLOW, x: C - 4.5, y: C + 3.5, ly: 0, data: {} });
+  put({ t: ET.GLOW, x: C - 3.5, y: C + 4.2, ly: 0, data: {} });
+  put({ t: ET.GLOW, x: C - 5.5, y: C + 3.8, ly: 0, data: {} });
+
+  // C. Subtle accent flower & stone at clearing margins
+  put({ t: ET.FLOWER, x: C + 4.5, y: C + 4.5, ly: 0, data: { c: 0, moist: 1 } });
+  put({ t: ET.STONE, x: C + 5.5, y: C - 4.5, ly: 4, data: {} });
+
+  // D. Fauna framing the scene
+  put({ t: ET.FOX, x: C - 7.5, y: C + 3.5, ly: 6, data: { trust: 0, state: 'wary', home: [C - 7.5, C + 3.5], wt: 0, dir: 0 } });
+  put({ t: ET.RABBIT, x: C + 4.5, y: C - 2.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
+  put({ t: ET.RABBIT, x: C - 2.5, y: C + 5.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
+
+  // E. Player placed cleanly at center spawn clearing
   player = { t: ET.PLAYER, x: C + 0.5, y: C + 0.5, ly: 7, data: { vx: 0, vy: 0, walk: 0, flip: 0 } };
-  entities.push(player);
+  put(player);
 }
 const mapCv = document.createElement('canvas');
 function paintGround() {
@@ -1085,7 +1293,12 @@ function walkable(x, y) {
     if (tiles[gi(tx, ty)] === TL.WATER) return false;
   }
   for (const e of entities) {
-    if ((e.t === ET.STONE || e.t === ET.RUIN) && Math.hypot(e.x - x, e.y - y) < 0.7) return false;
+    if (
+      (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.HERO_TREE) &&
+      Math.hypot(e.x - x, e.y - y) < (e.t === ET.HERO_TREE ? 0.9 : 0.7)
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -1096,6 +1309,8 @@ function entityAt(gx, gy) {
       Math.abs(e.x - gx) < 0.5 &&
       Math.abs(e.y - gy) < 0.5 &&
       (e.t === ET.TREE ||
+        e.t === ET.HERO_TREE ||
+        e.t === ET.DRIFTWOOD ||
         e.t === ET.STONE ||
         e.t === ET.FLOWER ||
         e.t === ET.MUSH ||
@@ -1122,7 +1337,7 @@ function dec(s) {
 function save() {
   try {
     localStorage.setItem(
-      'sw.v6',
+      'sw.v7',
       JSON.stringify({
         seed: S.seed,
         wd: S.worldDay,
@@ -1139,7 +1354,7 @@ function save() {
 }
 function load() {
   try {
-    const r = localStorage.getItem('sw.v6');
+    const r = localStorage.getItem('sw.v7');
     if (!r) return false;
     const o = JSON.parse(r);
     const t = dec(o.tiles);
@@ -1180,7 +1395,17 @@ function scheduleRegrow(x, y, t, d, sec) {
   regrow[x + ',' + y] = { t, d, at: Date.now() + sec * 1000 };
 }
 function gather(e, wx, wy) {
-  if (e.t === ET.TREE) {
+  if (e.t === ET.HERO_TREE) {
+    burst(wx, wy, [140, 195, 110], 8);
+    whisper('this ancient tree has sheltered many quiet moments.');
+    return;
+  } else if (e.t === ET.DRIFTWOOD) {
+    burst(wx, wy, [160, 140, 110], 7);
+    scheduleRegrow(Math.floor(wx), Math.floor(wy), ET.DRIFTWOOD, {}, 180 + Math.random() * 60);
+    remEntity(e);
+    whisper('smoothed by salt and time.');
+    return;
+  } else if (e.t === ET.TREE) {
     e.t = ET.STUMP;
     e.ly = 4;
     retex(e);
@@ -1544,7 +1769,7 @@ function update(dt, spreadFlowerFn) {
   if (ns !== state.curSeason) {
     state.curSeason = ns;
     entities.forEach((e) => {
-      if (e.t === ET.TREE) retex(e);
+      if (e.t === ET.TREE || e.t === ET.HERO_TREE) retex(e);
     });
   }
 
@@ -1644,8 +1869,8 @@ function update(dt, spreadFlowerFn) {
       const r = regrow[k];
       if (r.at <= Date.now()) {
         const p = k.split(','), x = +p[0], y = +p[1];
-        if (!entities.some((en) => Math.floor(en.x) === x && Math.floor(en.y) === y && (en.t === ET.TREE || en.t === ET.FLOWER || en.t === ET.STONE || en.t === ET.MUSH || en.t === ET.GLOW))) {
-          addEntity({ t: r.t, x: x + 0.5, y: y + 0.5, ly: r.t === ET.FLOWER || r.t === ET.MUSH || r.t === ET.GLOW ? 0 : 4, data: r.d || {} });
+        if (!entities.some((en) => Math.floor(en.x) === x && Math.floor(en.y) === y && (en.t === ET.TREE || en.t === ET.HERO_TREE || en.t === ET.FLOWER || en.t === ET.STONE || en.t === ET.MUSH || en.t === ET.GLOW))) {
+          addEntity({ t: r.t, x: x + 0.5, y: y + 0.5, ly: r.t === ET.FLOWER || r.t === ET.MUSH || r.t === ET.GLOW || r.t === ET.DRIFTWOOD ? 0 : 4, data: r.d || {} });
         }
         delete regrow[k];
       }
@@ -1757,74 +1982,87 @@ function update(dt, spreadFlowerFn) {
     shdG.clear();
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      const H = WH[e.t] || 10;
-      const hGrid = H / 22.0;
-
-      const dGx = Math.cos(shadowAngle) * L * hGrid;
-      const dGy = Math.sin(shadowAngle) * L * hGrid;
-
       const base = iso(e.x, e.y);
-      const tip = iso(e.x + dGx, e.y + dGy);
 
-      if (e.t === ET.TREE) {
-        const mid = iso(e.x + dGx * 0.35, e.y + dGy * 0.35);
-        const rX = Math.max(7, 14 * clamp(L * 0.42, 0.7, 2.0));
-        const rY = Math.max(4.5, 9 * clamp(L * 0.42, 0.7, 2.0));
+      // Height of entity in screen units
+      const H = WH[e.t] || 12;
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.32);
-        shdG.drawEllipse(tip.x, tip.y, rX * 1.25, rY * 1.25);
+      // Shadow projection vector on isometric ground plane
+      const len = H * L * 0.32;
+      const tipX = base.x + Math.cos(shadowAngle) * len;
+      const tipY = base.y + Math.sin(shadowAngle) * len * 0.5;
+
+      if (e.t === ET.TREE || e.t === ET.HERO_TREE) {
+        const isHero = e.t === ET.HERO_TREE;
+        const trunkW = isHero ? 4.5 : 2.5;
+
+        const rX = Math.max(7, (isHero ? 18 : 12) * clamp(L * 0.42, 0.7, 1.8));
+        const rY = Math.max(4, (isHero ? 10 : 6.5) * clamp(L * 0.42, 0.7, 1.8));
+
+        // 1. Solid Ground Contact Shadow directly at base of trunk
+        shdG.beginFill(shadowCol, baseAlpha * 0.80);
+        shdG.drawEllipse(base.x, base.y, trunkW * 1.8, trunkW * 0.9);
+        shdG.endFill();
+
+        // 2. Trunk shadow trapezoid connecting trunk base to canopy shadow tip
+        shdG.beginFill(shadowCol, baseAlpha * 0.65);
         shdG.drawPolygon([
-          base.x - 3, base.y,
-          base.x + 3, base.y,
-          tip.x + rX * 0.5, tip.y,
-          tip.x - rX * 0.5, tip.y
+          base.x - trunkW, base.y,
+          base.x + trunkW, base.y,
+          tipX + trunkW * 0.6, tipY,
+          tipX - trunkW * 0.6, tipY
         ]);
         shdG.endFill();
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.68);
-        shdG.drawEllipse(tip.x, tip.y, rX, rY);
-        shdG.drawPolygon([
-          base.x - 1.5, base.y,
-          base.x + 1.5, base.y,
-          mid.x + rX * 0.3, mid.y,
-          mid.x - rX * 0.3, mid.y
-        ]);
+        // 3. Soft Outer Canopy Shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.35);
+        shdG.drawEllipse(tipX, tipY, rX * 1.2, rY * 1.2);
+        shdG.endFill();
+
+        // 4. Inner Dark Canopy Shadow Core
+        shdG.beginFill(shadowCol, baseAlpha * 0.65);
+        shdG.drawEllipse(tipX, tipY, rX, rY);
         shdG.endFill();
       } else if (e.t === ET.PLAYER || e.t === ET.FOX || e.t === ET.RABBIT) {
-        const rad = (e.t === ET.PLAYER ? 6 : e.t === ET.FOX ? 7 : 4);
-        const charTip = iso(e.x + dGx * 0.65, e.y + dGy * 0.65);
+        const rad = (e.t === ET.PLAYER ? 5.5 : e.t === ET.FOX ? 6.5 : 3.5);
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.4);
-        shdG.drawEllipse(base.x, base.y, rad * 1.1, rad * 0.55);
-        shdG.drawEllipse(charTip.x, charTip.y, rad * 0.95, rad * 0.5);
+        // Ground contact shadow at feet
+        shdG.beginFill(shadowCol, baseAlpha * 0.85);
+        shdG.drawEllipse(base.x, base.y, rad * 1.2, rad * 0.6);
+        shdG.endFill();
+
+        // Cast body shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.55);
         shdG.drawPolygon([
           base.x - rad * 0.8, base.y,
           base.x + rad * 0.8, base.y,
-          charTip.x + rad * 0.7, charTip.y,
-          charTip.x - rad * 0.7, charTip.y
+          tipX + rad * 0.6, tipY,
+          tipX - rad * 0.6, tipY
         ]);
+        shdG.drawEllipse(tipX, tipY, rad * 0.9, rad * 0.45);
+        shdG.endFill();
+      } else if (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.STUMP || e.t === ET.DRIFTWOOD) {
+        const w = e.t === ET.RUIN ? 9 : e.t === ET.STONE ? 6.5 : e.t === ET.DRIFTWOOD ? 6 : 4.5;
+
+        // Ground contact shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.85);
+        shdG.drawEllipse(base.x, base.y, w * 1.2, w * 0.6);
         shdG.endFill();
 
-        shdG.beginFill(shadowCol, baseAlpha * 0.6);
-        shdG.drawEllipse((base.x + charTip.x) * 0.5, (base.y + charTip.y) * 0.5, rad * 0.85, rad * 0.45);
-        shdG.endFill();
-      } else if (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.STUMP) {
-        const stoneTip = iso(e.x + dGx * 0.8, e.y + dGy * 0.8);
-        const w = e.t === ET.RUIN ? 10 : e.t === ET.STONE ? 7 : 5;
-
-        shdG.beginFill(shadowCol, baseAlpha * 0.48);
+        // Cast shadow
+        shdG.beginFill(shadowCol, baseAlpha * 0.50);
         shdG.drawPolygon([
           base.x - w, base.y,
           base.x + w, base.y,
-          stoneTip.x + w * 0.75, stoneTip.y,
-          stoneTip.x - w * 0.75, stoneTip.y
+          tipX + w * 0.75, tipY,
+          tipX - w * 0.75, tipY
         ]);
-        shdG.drawEllipse(stoneTip.x, stoneTip.y, w * 0.8, w * 0.42);
+        shdG.drawEllipse(tipX, tipY, w * 0.85, w * 0.42);
         shdG.endFill();
       } else {
-        const itemTip = iso(e.x + dGx * 0.45, e.y + dGy * 0.45);
-        shdG.beginFill(shadowCol, baseAlpha * 0.35);
-        shdG.drawEllipse(itemTip.x, itemTip.y, 4.5, 2.3);
+        // Small items (flowers, mushrooms, reeds, glow)
+        shdG.beginFill(shadowCol, baseAlpha * 0.45);
+        shdG.drawEllipse(base.x, base.y, 4.0, 2.0);
         shdG.endFill();
       }
     }

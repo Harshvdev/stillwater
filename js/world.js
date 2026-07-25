@@ -18,12 +18,29 @@ export function setPlayer(p) {
 }
 
 export function genWorld() {
+  // 1. Terrain Pass (Landmass, Shoreline Notch for East Glint, Inland Pond)
   for (let y = 0; y < GRID; y++) {
     for (let x = 0; x < GRID; x++) {
       const dx = (x - C) / (GRID * 0.46);
       const dy = (y - C) / (GRID * 0.46);
-      const d = Math.sqrt(dx * dx + dy * dy);
-      let e = fbm(x * 0.045 + 7.3, y * 0.045 + 3.1) * 0.75 + (1 - d) * 0.64 - 0.18 + (h2(x, y) - 0.5) * 0.06;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // East shore notch: brings shoreline close to C on UP-RIGHT screen (increasing x, decreasing y)
+      const eastShoreDist = Math.hypot((x - (C + 14)) / 5, (y - (C - 6)) / 8);
+      const eastShoreNotch = Math.exp(-eastShoreDist * eastShoreDist) * 0.36;
+
+      let e = fbm(x * 0.045 + 7.3, y * 0.045 + 3.1) * 0.65 + (1 - dist) * 0.65 - eastShoreNotch - 0.16;
+
+      // Inland Serene Pond at NW (x = C - 14, y = C - 14)
+      const pdx = (x - (C - 14)) / 4.0;
+      const pdy = (y - (C - 14)) / 3.0;
+      const pondDist = Math.sqrt(pdx * pdx + pdy * pdy);
+      if (pondDist < 1.0) {
+        e = 0.32; // Inland water
+      } else if (pondDist < 1.4) {
+        e = 0.44; // Pond beach sand
+      }
+
       let t;
       if (e < 0.40) t = TL.WATER;
       else if (e < 0.47) t = TL.SAND;
@@ -32,13 +49,67 @@ export function genWorld() {
     }
   }
 
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
+  // Ensure coastal sand transition along water edges
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
       const idx = gi(x, y);
       if (tiles[idx] === TL.GRASS) {
-        const p1 = Math.abs(fbm(x * 0.055 + 14.2, y * 0.055 + 83.1) - 0.5);
-        const p2 = Math.abs(fbm(x * 0.04 + 31.7, y * 0.04 + 19.4) - 0.5);
-        if ((p1 < 0.024 || p2 < 0.02) && h2(x * 3.3, y * 2.7) < 0.75) {
+        let hasWater = false;
+        for (let oy = -1; oy <= 1 && !hasWater; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            if (tiles[gi(x + ox, y + oy)] === TL.WATER) hasWater = true;
+          }
+        }
+        if (hasWater) tiles[idx] = TL.SAND;
+      }
+    }
+  }
+
+  // Force Spawn Clearing (radius 7 around C, C) to be 100% pure GRASS
+  for (let y = C - 7; y <= C + 7; y++) {
+    for (let x = C - 7; x <= C + 7; x++) {
+      if (inB(x, y) && Math.hypot(x - C, y - C) <= 7.5) {
+        tiles[gi(x, y)] = TL.GRASS;
+      }
+    }
+  }
+
+  // 2. Authored Feature Dirt Floor Masks
+  // Thicket centers (with dark dirt under canopy)
+  const thickets = [
+    { cx: C - 9, cy: C + 6, r: 7 },   // Down-Left Framing Grove
+    { cx: C + 16, cy: C + 12, r: 8 }, // Down-Right Deep Forest
+    { cx: C - 15, cy: C - 10, r: 8 }  // Up-Left Woods
+  ];
+
+  // Rocky Outcrop centers
+  const rocks = [
+    { cx: C + 8, cy: C - 16, r: 6 },  // Up-Right Ridge
+    { cx: C - 18, cy: C + 2, r: 6 }   // Far West Crag
+  ];
+
+  // Flower Meadow center (hard edge, placed down-right distantly)
+  const meadow = { cx: C + 12, cy: C + 14, r: 6.5 };
+
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
+      const idx = gi(x, y);
+      if (tiles[idx] !== TL.GRASS) continue;
+
+      // Keep spawn clearing clean
+      if (Math.hypot(x - C, y - C) <= 7.5) continue;
+
+      // Thicket dirt interior
+      for (const th of thickets) {
+        const d = Math.hypot(x - th.cx, y - th.cy);
+        if (d < th.r * 0.65 && h2(x * 2.7, y * 3.1) < 0.85) {
+          tiles[idx] = TL.DIRT;
+        }
+      }
+      // Rocky outcrop dirt paths
+      for (const rk of rocks) {
+        const d = Math.hypot(x - rk.cx, y - rk.cy);
+        if (d < rk.r && h2(x * 1.9, y * 2.3) < 0.7) {
           tiles[idx] = TL.DIRT;
         }
       }
@@ -46,62 +117,131 @@ export function genWorld() {
   }
 
   entities = [];
+
+  const placed = new Set();
+  const canPlace = (tx, ty) => {
+    if (!inB(tx, ty)) return false;
+    const k = tx + ',' + ty;
+    if (placed.has(k)) return false;
+    // Strictly keep spawn clearing (radius 6 around C, C) empty for breathing room
+    if (Math.hypot(tx - C, ty - C) < 6.2) return false;
+    return true;
+  };
+  const put = (e) => {
+    const tx = Math.floor(e.x), ty = Math.floor(e.y);
+    placed.add(tx + ',' + ty);
+    entities.push(e);
+  };
+
+  // 3. Populate Authored Feature Clusters
+
+  // A. Forest Thickets (Trees, Shaded Dirt, Mushrooms inside)
   for (let y = 1; y < GRID - 1; y++) {
     for (let x = 1; x < GRID - 1; x++) {
-      const t = tiles[gi(x, y)], r = h2(x * 3.7 + 11, y * 3.7 + 5);
-      if (t === TL.GRASS || t === TL.DIRT) {
-        const tr = fbm(x * 0.09 + 77, y * 0.09 + 31);
-        if (tr > 0.66 && r < 0.72) {
-          entities.push({ t: ET.TREE, x: x + 0.5, y: y + 0.5, ly: 4, data: { v: (r * 4) | 0 } });
-          if (h2(x * 4.1, y * 5.3) < 0.7) tiles[gi(x, y)] = TL.DIRT;
-        } else if (r > 0.972) {
-          entities.push({ t: ET.GLOW, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
-        } else if (r > 0.956) {
-          entities.push({ t: ET.FLOWER, x: x + 0.5, y: y + 0.5, ly: 0, data: { c: (h2(x + 9, y + 3) * 5) | 0, moist: 1 } });
-        } else if (r > 0.92) {
-          entities.push({ t: ET.STONE, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
-          if (h2(x * 2.9, y * 1.7) < 0.6) tiles[gi(x, y)] = TL.DIRT;
-        } else if (r > 0.905) {
-          entities.push({ t: ET.MUSH, x: x + 0.5, y: y + 0.5, ly: 0, data: { v: (r * 2) | 0 } });
+      if (!canPlace(x, y)) continue;
+      const t = tiles[gi(x, y)];
+      if (t !== TL.GRASS && t !== TL.DIRT) continue;
+
+      for (const th of thickets) {
+        const d = Math.hypot(x - th.cx, y - th.cy);
+        if (d < th.r) {
+          const edgeF = 1 - d / th.r;
+          const rnd = h2(x * 4.1 + 13, y * 3.9 + 7);
+          if (rnd < edgeF * 0.88) {
+            put({ t: ET.TREE, x: x + 0.5, y: y + 0.5, ly: 4, data: { v: (rnd * 4) | 0 } });
+          } else if (rnd > 0.85 && d < th.r * 0.65) {
+            put({ t: ET.MUSH, x: x + 0.5, y: y + 0.5, ly: 0, data: { v: (rnd * 2) | 0 } });
+          }
         }
-      } else if (t === TL.SAND) {
-        let w = false;
-        for (let oy = -1; oy <= 1 && !w; oy++) {
+      }
+    }
+  }
+
+  // B. Flower Meadow (Dense multi-colored flowers with sharp, hard edge)
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
+      if (!canPlace(x, y)) continue;
+      if (tiles[gi(x, y)] !== TL.GRASS) continue;
+
+      const d = Math.hypot(x - meadow.cx, y - meadow.cy);
+      if (d <= meadow.r) {
+        const rnd = h2(x * 5.3 + 9, y * 4.7 + 11);
+        if (rnd < 0.70) {
+          const col = ((h2(x + 17, y + 23) * 5) | 0);
+          put({ t: ET.FLOWER, x: x + 0.5, y: y + 0.5, ly: 0, data: { c: col, moist: 1 } });
+        }
+      }
+    }
+  }
+
+  // C. Rocky Outcrops
+  for (const rk of rocks) {
+    for (let y = Math.floor(rk.cy - rk.r); y <= Math.ceil(rk.cy + rk.r); y++) {
+      for (let x = Math.floor(rk.cx - rk.r); x <= Math.ceil(rk.cx + rk.r); x++) {
+        if (!canPlace(x, y)) continue;
+        const t = tiles[gi(x, y)];
+        if (t !== TL.GRASS && t !== TL.DIRT) continue;
+        const d = Math.hypot(x - rk.cx, y - rk.cy);
+        if (d <= rk.r) {
+          const rnd = h2(x * 3.3 + 2.1, y * 3.3 + 5.7);
+          if (rnd > 0.70) {
+            put({ t: ET.STONE, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
+          } else if (rnd < 0.14 && d < 3.5) {
+            put({ t: ET.RUIN, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
+          }
+        }
+      }
+    }
+  }
+
+  // D. Beach with Driftwood & Reeds
+  for (let y = 1; y < GRID - 1; y++) {
+    for (let x = 1; x < GRID - 1; x++) {
+      if (!canPlace(x, y)) continue;
+      const t = tiles[gi(x, y)];
+      if (t === TL.SAND) {
+        let nearWater = false;
+        for (let oy = -1; oy <= 1 && !nearWater; oy++) {
           for (let ox = -1; ox <= 1; ox++) {
             if (inB(x + ox, y + oy) && tiles[gi(x + ox, y + oy)] === TL.WATER) {
-              w = true;
-              break;
+              nearWater = true;
             }
           }
         }
-        if (w && r > 0.85) entities.push({ t: ET.REED, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        const rnd = h2(x * 2.9 + 17, y * 3.1 + 3);
+        if (nearWater && rnd > 0.75) {
+          put({ t: ET.REED, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        } else if (rnd > 0.93) {
+          put({ t: ET.DRIFTWOOD, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        }
       }
     }
   }
 
-  for (let y = C - 3; y <= C + 3; y++) {
-    for (let x = C - 3; x <= C + 3; x++) {
-      if ((x - C) * (x - C) + (y - C) * (y - C) <= 12) {
-        entities = entities.filter((e) => !(Math.floor(e.x) === x && Math.floor(e.y) === y));
-      }
-    }
-  }
+  // 4. Composed Starting View Postcard Setup around Spawn (C, C)
+  // Ensure strict radius 5.5 is clear of any entities
+  entities = entities.filter((e) => Math.hypot(e.x - C, e.y - C) > 5.5);
 
-  [[C - 3, C - 2], [C + 3, C - 1], [C - 1, C + 3], [C + 2, C - 3]].forEach((p) => {
-    entities.push({ t: ET.RUIN, x: p[0] + 0.5, y: p[1] + 0.5, ly: 4, data: {} });
-    tiles[gi(p[0], p[1])] = TL.DIRT;
-  });
-  entities.push({ t: ET.STONE, x: C + 1.5, y: C + 1.5, ly: 4, data: {} });
-  entities.push({ t: ET.STONE, x: C - 2.5, y: C + 0.5, ly: 4, data: {} });
-  entities.push({ t: ET.FLOWER, x: C + 2.5, y: C + 2.5, ly: 0, data: { c: 0, moist: 1 } });
-  entities.push({ t: ET.FLOWER, x: C - 2.5, y: C - 2.5, ly: 0, data: { c: 2, moist: 1 } });
-  entities.push({ t: ET.GLOW, x: C + 3.5, y: C - 1.5, ly: 0, data: {} });
-  entities.push({ t: ET.GLOW, x: C - 3.5, y: C + 2.5, ly: 0, data: {} });
-  entities.push({ t: ET.FOX, x: C + 6.5, y: C - 5.5, ly: 6, data: { trust: 0, state: 'wary', home: [C + 6.5, C - 5.5], wt: 0, dir: 0 } });
-  entities.push({ t: ET.RABBIT, x: C - 6.5, y: C + 4.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
-  entities.push({ t: ET.RABBIT, x: C + 5.5, y: C + 6.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
+  // A. Hero Tree framing top-left of spawn clearing
+  put({ t: ET.HERO_TREE, x: C - 4.5, y: C - 3.5, ly: 4, data: {} });
+
+  // B. Knot of Glow-Flowers waiting for night framing bottom-left of hero tree
+  put({ t: ET.GLOW, x: C - 4.5, y: C + 3.5, ly: 0, data: {} });
+  put({ t: ET.GLOW, x: C - 3.5, y: C + 4.2, ly: 0, data: {} });
+  put({ t: ET.GLOW, x: C - 5.5, y: C + 3.8, ly: 0, data: {} });
+
+  // C. Subtle accent flower & stone at clearing margins
+  put({ t: ET.FLOWER, x: C + 4.5, y: C + 4.5, ly: 0, data: { c: 0, moist: 1 } });
+  put({ t: ET.STONE, x: C + 5.5, y: C - 4.5, ly: 4, data: {} });
+
+  // D. Fauna framing the scene
+  put({ t: ET.FOX, x: C - 7.5, y: C + 3.5, ly: 6, data: { trust: 0, state: 'wary', home: [C - 7.5, C + 3.5], wt: 0, dir: 0 } });
+  put({ t: ET.RABBIT, x: C + 4.5, y: C - 2.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
+  put({ t: ET.RABBIT, x: C - 2.5, y: C + 5.5, ly: 6, data: { wt: 0, dir: Math.random() * Math.PI * 2, mv: 0 } });
+
+  // E. Player placed cleanly at center spawn clearing
   player = { t: ET.PLAYER, x: C + 0.5, y: C + 0.5, ly: 7, data: { vx: 0, vy: 0, walk: 0, flip: 0 } };
-  entities.push(player);
+  put(player);
 }
 
 export const mapCv = document.createElement('canvas');
@@ -236,7 +376,12 @@ export function walkable(x, y) {
     if (tiles[gi(tx, ty)] === TL.WATER) return false;
   }
   for (const e of entities) {
-    if ((e.t === ET.STONE || e.t === ET.RUIN) && Math.hypot(e.x - x, e.y - y) < 0.7) return false;
+    if (
+      (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.HERO_TREE) &&
+      Math.hypot(e.x - x, e.y - y) < (e.t === ET.HERO_TREE ? 0.9 : 0.7)
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -248,6 +393,8 @@ export function entityAt(gx, gy) {
       Math.abs(e.x - gx) < 0.5 &&
       Math.abs(e.y - gy) < 0.5 &&
       (e.t === ET.TREE ||
+        e.t === ET.HERO_TREE ||
+        e.t === ET.DRIFTWOOD ||
         e.t === ET.STONE ||
         e.t === ET.FLOWER ||
         e.t === ET.MUSH ||

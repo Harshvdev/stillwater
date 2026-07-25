@@ -21,6 +21,8 @@ export const ET = {
   RUIN: 7,
   REED: 8,
   GLOW: 9,
+  DRIFTWOOD: 10,
+  HERO_TREE: 11,
   FOX: 12,
   RABBIT: 13,
   PLAYER: 14
@@ -61,6 +63,8 @@ export const WH = {
   7: 17,
   8: 13,
   9: 11,
+  10: 12,
+  11: 46,
   12: 13,
   13: 10,
   14: 17

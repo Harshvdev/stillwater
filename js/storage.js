@@ -20,7 +20,7 @@ export function dec(s) {
 export function save() {
   try {
     localStorage.setItem(
-      'sw.v6',
+      'sw.v7',
       JSON.stringify({
         seed: S.seed,
         wd: S.worldDay,
@@ -38,7 +38,7 @@ export function save() {
 
 export function load() {
   try {
-    const r = localStorage.getItem('sw.v6');
+    const r = localStorage.getItem('sw.v7');
     if (!r) return false;
     const o = JSON.parse(r);
     const t = dec(o.tiles);

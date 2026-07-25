@@ -10,7 +10,17 @@ export function scheduleRegrow(x, y, t, d, sec) {
 }
 
 export function gather(e, wx, wy) {
-  if (e.t === ET.TREE) {
+  if (e.t === ET.HERO_TREE) {
+    burst(wx, wy, [140, 195, 110], 8);
+    whisper('this ancient tree has sheltered many quiet moments.');
+    return;
+  } else if (e.t === ET.DRIFTWOOD) {
+    burst(wx, wy, [160, 140, 110], 7);
+    scheduleRegrow(Math.floor(wx), Math.floor(wy), ET.DRIFTWOOD, {}, 180 + Math.random() * 60);
+    remEntity(e);
+    whisper('smoothed by salt and time.');
+    return;
+  } else if (e.t === ET.TREE) {
     e.t = ET.STUMP;
     e.ly = 4;
     retex(e);

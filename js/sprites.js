@@ -217,6 +217,61 @@ function dRabbit(x) {
   disc(x, 12.4, 6.6, 0.75, 'rgb(66,46,36)');
 }
 
+function dDriftwood(x) {
+  shd(x, 10, 12, 7.5, 2.2);
+  soft(x, 10, 9.5, 7.2, 2.8, 'rgb(148,132,112)');
+  soft(x, 9, 8.5, 5.5, 2.0, 'rgb(178,162,140)');
+  soft(x, 14, 9, 2.2, 1.6, 'rgb(120,105,88)');
+  x.strokeStyle = 'rgba(88,72,56,0.6)';
+  x.lineWidth = 1;
+  x.beginPath();
+  x.moveTo(4, 9.5);
+  x.lineTo(15, 9);
+  x.moveTo(6, 8.2);
+  x.lineTo(12, 8.0);
+  x.stroke();
+  disc(x, 11, 8.8, 0.8, 'rgb(95,80,64)');
+}
+
+function dHeroTree(x, fol, hi, extra) {
+  // Single, solid, majestic trunk
+  x.fillStyle = 'rgb(76,52,34)';
+  x.beginPath();
+  x.moveTo(13, 42); // left root flare
+  x.lineTo(15.5, 20); // left top near canopy
+  x.lineTo(20.5, 20); // right top near canopy
+  x.lineTo(23, 42); // right root flare
+  x.closePath();
+  x.fill();
+
+  // Root flares & bark texture shading
+  soft(x, 13.5, 41.5, 3.2, 1.8, 'rgb(58,38,22)');
+  soft(x, 22.5, 41.5, 3.2, 1.8, 'rgb(58,38,22)');
+  soft(x, 17, 30, 2.2, 9, 'rgb(98,72,48)');
+
+  // Main grand canopy layers
+  soft(x, 18, 17, 15.5, 13.5, rgb(fol));
+  soft(x, 12, 13, 8.5, 7.8, rgb(hi));
+  soft(x, 24, 14, 8, 7.5, rgb(hi));
+  soft(x, 18, 8.5, 7.5, 6.5, rgba([255, 255, 255, 0.22], 1));
+  soft(x, 23, 22, 7.5, 6.8, rgba([10, 36, 18, 0.5], 1));
+
+  if (extra === 'blossom') {
+    for (let i = 0; i < 11; i++) {
+      const a = i * 1.5, hh = h2(i * 4.1, i * 2.3);
+      soft(x, 12 + Math.cos(a) * 8 + hh * 3, 13 + Math.sin(a) * 6, 2.0, 2.0, 'rgba(255,215,230,0.9)');
+    }
+  } else if (extra === 'snow') {
+    soft(x, 16, 8, 10, 4.2, 'rgba(244,248,255,0.95)');
+    soft(x, 22, 12, 6, 3, 'rgba(244,248,255,0.85)');
+  } else if (extra === 'autumn') {
+    for (let i = 0; i < 9; i++) {
+      const a = i * 1.9;
+      soft(x, 15 + Math.cos(a) * 8, 15 + Math.sin(a) * 6, 2.1, 2.1, 'rgba(224,106,58,0.75)');
+    }
+  }
+}
+
 function dDot(x) {
   soft(x, 4, 4, 3.6, 3.6, 'rgb(255,255,255)');
 }
@@ -229,6 +284,11 @@ export function buildSprites() {
   CV.tree1 = paintSprite(28, 32, (x) => dTree(x, [78, 146, 82], [150, 206, 138], null));
   CV.tree2 = paintSprite(28, 32, (x) => dTree(x, [186, 128, 64], [224, 176, 110], 'autumn'));
   CV.tree3 = paintSprite(28, 32, (x) => dTree(x, [120, 134, 142], [176, 188, 196], 'snow'));
+  CV.heroTree0 = paintSprite(36, 44, (x) => dHeroTree(x, [82, 140, 92], [150, 200, 140], 'blossom'));
+  CV.heroTree1 = paintSprite(36, 44, (x) => dHeroTree(x, [78, 146, 82], [150, 206, 138], null));
+  CV.heroTree2 = paintSprite(36, 44, (x) => dHeroTree(x, [186, 128, 64], [224, 176, 110], 'autumn'));
+  CV.heroTree3 = paintSprite(36, 44, (x) => dHeroTree(x, [120, 134, 142], [176, 188, 196], 'snow'));
+  CV.driftwood = paintSprite(20, 14, dDriftwood);
   for (let c = 0; c < 5; c++) CV['flower' + c] = paintSprite(14, 14, (x) => dFlower(x, FC[c]));
   CV.glow = paintSprite(14, 14, dGlow);
   CV.stump = paintSprite(14, 14, dStump);
@@ -256,6 +316,10 @@ export function texFor(e, curSeasonIdx = state.curSeason) {
   switch (e.t) {
     case ET.TREE:
       return TEX['tree' + curSeasonIdx];
+    case ET.HERO_TREE:
+      return TEX['heroTree' + curSeasonIdx];
+    case ET.DRIFTWOOD:
+      return TEX.driftwood;
     case ET.FLOWER:
       return TEX['flower' + ((e.data.c || 0) % 5)];
     case ET.GLOW:
