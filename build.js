@@ -8,6 +8,7 @@ const files = [
   'shaders.js',
   'whisper.js',
   'sprites.js',
+  'player.js',
   'world.js',
   'storage.js',
   'actions.js',

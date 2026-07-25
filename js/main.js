@@ -15,6 +15,7 @@ import {
   update
 } from './game.js';
 import { spreadFlower } from './actions.js';
+import { initPlayerCharacter } from './player.js';
 
 function $(s) {
   return document.querySelector(s);
@@ -35,6 +36,7 @@ window.addEventListener('load', () => {
 
     buildSprites();
     buildTextures();
+    initPlayerCharacter();
     paintGround();
 
     initApp();

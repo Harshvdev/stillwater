@@ -8,6 +8,7 @@ import { whisper, mem, AMB, memSet } from './whisper.js';
 import { save } from './storage.js';
 import { keys, touchVec } from './input.js';
 import { screenToGrid } from './actions.js';
+import { updatePlayerCharacter } from './player.js';
 
 export let app = null;
 export let groundFilter = null;
@@ -261,6 +262,8 @@ export function update(dt, spreadFlowerFn) {
     player.data.walk = 0;
   }
 
+  updatePlayerCharacter(dt);
+
   const pp = iso(player.x, player.y);
   view.tx = pp.x;
   view.ty = pp.y;
@@ -394,10 +397,10 @@ export function update(dt, spreadFlowerFn) {
     e.sprite.zIndex = Math.round(e.x + e.y) * 10 + e.ly;
 
     if (e.t === ET.PLAYER) {
-      e.sprite.texture = e.data.walk > 0 ? TEX.playerW : TEX.player;
+      e.sprite.texture = TEX.player;
       e._bs = WH[14] / e.sprite.texture.orig.height;
-      e.sprite.scale.set((e.data.flip ? -1 : 1) * e._bs, e._bs);
-      e.sprite.tint = 0xffffff;
+      e.sprite.scale.set(e._bs, e._bs);
+      e.sprite.tint = dayT;
     } else if (e.t === ET.FOX) {
       const wk = Math.sin(state.gt * 4 + e.x) > 0.3;
       e.sprite.texture = wk ? TEX.foxW : TEX.fox;
@@ -428,7 +431,7 @@ export function update(dt, spreadFlowerFn) {
 
   pHalo.x = pp.x;
   pHalo.y = pp.y - 12;
-  pHalo.alpha = 0.22 * state.nightF * (0.85 + 0.15 * Math.sin(state.gt * 1.7));
+  pHalo.alpha = 0;
 
   for (const f of flies) {
     f.ph += dt * f.sp2;
