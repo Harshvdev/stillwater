@@ -13,6 +13,8 @@ import { updatePlayerCharacter } from './player.js';
 export let app = null;
 export let groundFilter = null;
 export let world = null;
+export let shdC = null;
+export let shdG = null;
 export let lightC = null;
 export let entC = null;
 export let fxC = null;
@@ -43,12 +45,15 @@ export function initApp() {
   groundFilter = createGroundFilter();
 
   world = new PIXI.Container();
+  shdC = new PIXI.Container();
+  shdG = new PIXI.Graphics();
+  shdC.addChild(shdG);
   lightC = new PIXI.Container();
   entC = new PIXI.Container();
   entC.sortableChildren = true;
   fxC = new PIXI.Container();
 
-  world.addChild(lightC, entC, fxC);
+  world.addChild(shdC, lightC, entC, fxC);
   app.stage.addChild(world);
 
   ripplesG = new PIXI.Graphics();
@@ -174,7 +179,7 @@ let regrowTick = 5, spreadTick = 16, ambT = 24, saveT = 0;
 
 export function update(dt, spreadFlowerFn) {
   state.gt += dt;
-  S.worldDay += dt / 210;
+  S.worldDay += dt / 140;
   const phase = S.worldDay % 1, sun = Math.sin(phase * TAU);
   state.daylight = sm(-0.12, 0.25, sun);
   state.nightF = 1 - sm(-0.28, 0.02, sun);
@@ -375,7 +380,106 @@ export function update(dt, spreadFlowerFn) {
     }
   }
 
-  const dayT = tintInt(lerp(0.34, 1, state.daylight), lerp(0.42, 1, state.daylight), lerp(0.64, 1, state.daylight));
+  const sunElevation = Math.sin(phase * Math.PI);
+  const isDay = sunElevation > 0;
+
+  const sunAzimuth = phase * TAU;
+  const shadowAngle = sunAzimuth + Math.PI;
+
+  const golden = Math.pow(Math.max(0, 1 - Math.abs(sunElevation - 0.16) * 3.6), 1.6);
+  state.golden = golden;
+
+  const L = isDay
+    ? clamp(0.35 / Math.max(0.12, sunElevation), 0.35, 3.2)
+    : 1.4;
+
+  const baseAlpha = isDay
+    ? (0.30 + 0.18 * (1 - Math.abs(sunElevation))) * Math.min(1, sunElevation * 3)
+    : state.nightF * 0.22;
+
+  const shadowCol = isDay ? 0x0a1610 : 0x081228;
+
+  if (shdG) {
+    shdG.clear();
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      const H = WH[e.t] || 10;
+      const hGrid = H / 22.0;
+
+      const dGx = Math.cos(shadowAngle) * L * hGrid;
+      const dGy = Math.sin(shadowAngle) * L * hGrid;
+
+      const base = iso(e.x, e.y);
+      const tip = iso(e.x + dGx, e.y + dGy);
+
+      if (e.t === ET.TREE) {
+        const mid = iso(e.x + dGx * 0.35, e.y + dGy * 0.35);
+        const rX = Math.max(7, 14 * clamp(L * 0.42, 0.7, 2.0));
+        const rY = Math.max(4.5, 9 * clamp(L * 0.42, 0.7, 2.0));
+
+        shdG.beginFill(shadowCol, baseAlpha * 0.32);
+        shdG.drawEllipse(tip.x, tip.y, rX * 1.25, rY * 1.25);
+        shdG.drawPolygon([
+          base.x - 3, base.y,
+          base.x + 3, base.y,
+          tip.x + rX * 0.5, tip.y,
+          tip.x - rX * 0.5, tip.y
+        ]);
+        shdG.endFill();
+
+        shdG.beginFill(shadowCol, baseAlpha * 0.68);
+        shdG.drawEllipse(tip.x, tip.y, rX, rY);
+        shdG.drawPolygon([
+          base.x - 1.5, base.y,
+          base.x + 1.5, base.y,
+          mid.x + rX * 0.3, mid.y,
+          mid.x - rX * 0.3, mid.y
+        ]);
+        shdG.endFill();
+      } else if (e.t === ET.PLAYER || e.t === ET.FOX || e.t === ET.RABBIT) {
+        const rad = (e.t === ET.PLAYER ? 6 : e.t === ET.FOX ? 7 : 4);
+        const charTip = iso(e.x + dGx * 0.65, e.y + dGy * 0.65);
+
+        shdG.beginFill(shadowCol, baseAlpha * 0.4);
+        shdG.drawEllipse(base.x, base.y, rad * 1.1, rad * 0.55);
+        shdG.drawEllipse(charTip.x, charTip.y, rad * 0.95, rad * 0.5);
+        shdG.drawPolygon([
+          base.x - rad * 0.8, base.y,
+          base.x + rad * 0.8, base.y,
+          charTip.x + rad * 0.7, charTip.y,
+          charTip.x - rad * 0.7, charTip.y
+        ]);
+        shdG.endFill();
+
+        shdG.beginFill(shadowCol, baseAlpha * 0.6);
+        shdG.drawEllipse((base.x + charTip.x) * 0.5, (base.y + charTip.y) * 0.5, rad * 0.85, rad * 0.45);
+        shdG.endFill();
+      } else if (e.t === ET.STONE || e.t === ET.RUIN || e.t === ET.STUMP) {
+        const stoneTip = iso(e.x + dGx * 0.8, e.y + dGy * 0.8);
+        const w = e.t === ET.RUIN ? 10 : e.t === ET.STONE ? 7 : 5;
+
+        shdG.beginFill(shadowCol, baseAlpha * 0.48);
+        shdG.drawPolygon([
+          base.x - w, base.y,
+          base.x + w, base.y,
+          stoneTip.x + w * 0.75, stoneTip.y,
+          stoneTip.x - w * 0.75, stoneTip.y
+        ]);
+        shdG.drawEllipse(stoneTip.x, stoneTip.y, w * 0.8, w * 0.42);
+        shdG.endFill();
+      } else {
+        const itemTip = iso(e.x + dGx * 0.45, e.y + dGy * 0.45);
+        shdG.beginFill(shadowCol, baseAlpha * 0.35);
+        shdG.drawEllipse(itemTip.x, itemTip.y, 4.5, 2.3);
+        shdG.endFill();
+      }
+    }
+  }
+
+  const dayR = lerp(0.32, lerp(1.0, 1.36, golden), state.daylight);
+  const dayG = lerp(0.42, lerp(1.0, 0.94, golden), state.daylight);
+  const dayB = lerp(0.66, lerp(1.0, 0.68, golden), state.daylight);
+  const dayT = tintInt(dayR, dayG, dayB);
   state.hoverEnt = null;
 
   if (mouse.x > -99) {
@@ -483,6 +587,7 @@ export function update(dt, spreadFlowerFn) {
     const gu = groundFilter.uniforms;
     gu.u_day = state.daylight;
     gu.u_dusk = state.dusk;
+    gu.u_golden = golden;
     gu.u_seas = state.sTint;
   }
 

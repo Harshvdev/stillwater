@@ -28,21 +28,42 @@ export function genWorld() {
       if (e < 0.40) t = TL.WATER;
       else if (e < 0.47) t = TL.SAND;
       else t = TL.GRASS;
-      if (t === TL.GRASS && fbm(x * 0.08 + 40, y * 0.08 + 17) > 0.63) t = TL.DIRT;
       tiles[gi(x, y)] = t;
     }
   }
+
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      const idx = gi(x, y);
+      if (tiles[idx] === TL.GRASS) {
+        const p1 = Math.abs(fbm(x * 0.055 + 14.2, y * 0.055 + 83.1) - 0.5);
+        const p2 = Math.abs(fbm(x * 0.04 + 31.7, y * 0.04 + 19.4) - 0.5);
+        if ((p1 < 0.024 || p2 < 0.02) && h2(x * 3.3, y * 2.7) < 0.75) {
+          tiles[idx] = TL.DIRT;
+        }
+      }
+    }
+  }
+
   entities = [];
   for (let y = 1; y < GRID - 1; y++) {
     for (let x = 1; x < GRID - 1; x++) {
       const t = tiles[gi(x, y)], r = h2(x * 3.7 + 11, y * 3.7 + 5);
-      if (t === TL.GRASS) {
+      if (t === TL.GRASS || t === TL.DIRT) {
         const tr = fbm(x * 0.09 + 77, y * 0.09 + 31);
-        if (tr > 0.66 && r < 0.72) entities.push({ t: ET.TREE, x: x + 0.5, y: y + 0.5, ly: 4, data: { v: (r * 4) | 0 } });
-        else if (r > 0.972) entities.push({ t: ET.GLOW, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
-        else if (r > 0.956) entities.push({ t: ET.FLOWER, x: x + 0.5, y: y + 0.5, ly: 0, data: { c: (h2(x + 9, y + 3) * 5) | 0, moist: 1 } });
-        else if (r > 0.92) entities.push({ t: ET.STONE, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
-        else if (r > 0.905) entities.push({ t: ET.MUSH, x: x + 0.5, y: y + 0.5, ly: 0, data: { v: (r * 2) | 0 } });
+        if (tr > 0.66 && r < 0.72) {
+          entities.push({ t: ET.TREE, x: x + 0.5, y: y + 0.5, ly: 4, data: { v: (r * 4) | 0 } });
+          if (h2(x * 4.1, y * 5.3) < 0.7) tiles[gi(x, y)] = TL.DIRT;
+        } else if (r > 0.972) {
+          entities.push({ t: ET.GLOW, x: x + 0.5, y: y + 0.5, ly: 0, data: {} });
+        } else if (r > 0.956) {
+          entities.push({ t: ET.FLOWER, x: x + 0.5, y: y + 0.5, ly: 0, data: { c: (h2(x + 9, y + 3) * 5) | 0, moist: 1 } });
+        } else if (r > 0.92) {
+          entities.push({ t: ET.STONE, x: x + 0.5, y: y + 0.5, ly: 4, data: {} });
+          if (h2(x * 2.9, y * 1.7) < 0.6) tiles[gi(x, y)] = TL.DIRT;
+        } else if (r > 0.905) {
+          entities.push({ t: ET.MUSH, x: x + 0.5, y: y + 0.5, ly: 0, data: { v: (r * 2) | 0 } });
+        }
       } else if (t === TL.SAND) {
         let w = false;
         for (let oy = -1; oy <= 1 && !w; oy++) {
@@ -58,18 +79,18 @@ export function genWorld() {
     }
   }
 
-  for (let y = C - 4; y <= C + 4; y++) {
-    for (let x = C - 4; x <= C + 4; x++) {
-      if ((x - C) * (x - C) + (y - C) * (y - C) <= 18) {
-        tiles[gi(x, y)] = TL.GRASS;
+  for (let y = C - 3; y <= C + 3; y++) {
+    for (let x = C - 3; x <= C + 3; x++) {
+      if ((x - C) * (x - C) + (y - C) * (y - C) <= 12) {
         entities = entities.filter((e) => !(Math.floor(e.x) === x && Math.floor(e.y) === y));
       }
     }
   }
 
-  [[C - 3, C - 2], [C + 3, C - 1], [C - 1, C + 3], [C + 2, C - 3]].forEach((p) =>
-    entities.push({ t: ET.RUIN, x: p[0] + 0.5, y: p[1] + 0.5, ly: 4, data: {} })
-  );
+  [[C - 3, C - 2], [C + 3, C - 1], [C - 1, C + 3], [C + 2, C - 3]].forEach((p) => {
+    entities.push({ t: ET.RUIN, x: p[0] + 0.5, y: p[1] + 0.5, ly: 4, data: {} });
+    tiles[gi(p[0], p[1])] = TL.DIRT;
+  });
   entities.push({ t: ET.STONE, x: C + 1.5, y: C + 1.5, ly: 4, data: {} });
   entities.push({ t: ET.STONE, x: C - 2.5, y: C + 0.5, ly: 4, data: {} });
   entities.push({ t: ET.FLOWER, x: C + 2.5, y: C + 2.5, ly: 0, data: { c: 0, moist: 1 } });
@@ -85,90 +106,126 @@ export function genWorld() {
 
 export const mapCv = document.createElement('canvas');
 
-function diamond(ctx, cx, cy, col) {
-  ctx.fillStyle = col;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - ISO.HH);
-  ctx.lineTo(cx + ISO.HW, cy);
-  ctx.lineTo(cx, cy + ISO.HH);
-  ctx.lineTo(cx - ISO.HW, cy);
-  ctx.closePath();
-  ctx.fill();
-}
-
 export function paintGround() {
   mapCv.width = ISO.CANW;
   mapCv.height = ISO.CANH;
   const mctx = mapCv.getContext('2d');
-  mctx.fillStyle = rgb(mix3(PAL[0][0], PAL[0][1], 0.5));
-  mctx.fillRect(0, 0, ISO.CANW, ISO.CANH);
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
-      const t = tiles[gi(x, y)], p = iso(x + 0.5, y + 0.5), hh = h2(x * 1.3 + 0.7, y * 1.3 + 0.3);
-      diamond(mctx, p.x, p.y, rgb(mix3(PAL[t][0], PAL[t][1], hh)));
-      mctx.save();
-      mctx.beginPath();
-      mctx.moveTo(p.x, p.y - ISO.HH);
-      mctx.lineTo(p.x + ISO.HW, p.y);
-      mctx.lineTo(p.x, p.y + ISO.HH);
-      mctx.lineTo(p.x - ISO.HW, p.y);
-      mctx.closePath();
-      mctx.clip();
-      if (t === TL.GRASS) {
-        mctx.fillStyle = 'rgba(52,94,44,0.16)';
-        for (let i = 0; i < 5; i++) {
-          const a = h2(x * 7.1 + i, y * 7.7 + i * 3);
-          mctx.fillRect(p.x - ISO.HW + ((a * 2 * ISO.HW) | 0), p.y - ISO.HH + ((h2(x + i * 3.3, y + i) * 2 * ISO.HH) | 0), 1, 2);
+  const w = ISO.CANW;
+  const h = ISO.CANH;
+  const imgData = mctx.createImageData(w, h);
+  const data = imgData.data;
+
+  const deepOcean = [16, 42, 64];
+  const getT = (tx, ty) => (inB(tx, ty) ? tiles[gi(tx, ty)] : TL.WATER);
+
+  for (let py = 0; py < h; py++) {
+    const dy = (py - ISO.OFFY) / ISO.HH;
+    for (let px = 0; px < w; px++) {
+      const dx = (px - ISO.OFFX) / ISO.HW;
+      const gx = (dy + dx) * 0.5;
+      const gy = (dy - dx) * 0.5;
+
+      const pIdx = (py * w + px) * 4;
+
+      const cdx = (gx - C) / (GRID * 0.48);
+      const cdy = (gy - C) / (GRID * 0.48);
+      const distFromC = Math.sqrt(cdx * cdx + cdy * cdy);
+
+      if (gx < -2 || gy < -2 || gx > GRID + 2 || gy > GRID + 2 || distFromC > 1.25) {
+        data[pIdx] = deepOcean[0];
+        data[pIdx + 1] = deepOcean[1];
+        data[pIdx + 2] = deepOcean[2];
+        data[pIdx + 3] = 255;
+        continue;
+      }
+
+      const n1 = vnoise(gx * 0.16 + 7.1, gy * 0.16 + 2.3);
+      const n2 = vnoise(gx * 0.16 + 3.8, gy * 0.16 + 8.4);
+      const wx = gx + (n1 - 0.5) * 1.6;
+      const wy = gy + (n2 - 0.5) * 1.6;
+
+      const x0 = Math.floor(wx);
+      const y0 = Math.floor(wy);
+      const x1 = x0 + 1;
+      const y1 = y0 + 1;
+
+      const fx = wx - x0;
+      const fy = wy - y0;
+
+      const u = fx * fx * (3 - 2 * fx);
+      const v = fy * fy * (3 - 2 * fy);
+
+      const t00 = getT(x0, y0);
+      const t10 = getT(x1, y0);
+      const t01 = getT(x0, y1);
+      const t11 = getT(x1, y1);
+
+      const w00 = (1 - u) * (1 - v);
+      const w10 = u * (1 - v);
+      const w01 = (1 - u) * v;
+      const w11 = u * v;
+
+      let rAcc = 0, gAcc = 0, bAcc = 0;
+      let waterWeight = 0;
+
+      const corners = [
+        { t: t00, x: x0, y: y0, w: w00 },
+        { t: t10, x: x1, y: y0, w: w10 },
+        { t: t01, x: x0, y: y1, w: w01 },
+        { t: t11, x: x1, y: y1, w: w11 }
+      ];
+
+      for (let i = 0; i < 4; i++) {
+        const c = corners[i];
+        if (c.w <= 0) continue;
+        const hh = h2(c.x * 1.3 + 0.7, c.y * 1.3 + 0.3);
+        let col = mix3(PAL[c.t][0], PAL[c.t][1], hh);
+
+        if (c.t === TL.GRASS) {
+          const varN = fbm(wx * 0.4 + 1.2, wy * 0.4 + 9.5);
+          col = [col[0] + (varN - 0.5) * 14, col[1] + (varN - 0.5) * 18, col[2] + (varN - 0.5) * 12];
+        } else if (c.t === TL.DIRT) {
+          const varN = fbm(wx * 0.5 + 3.4, wy * 0.5 + 4.1);
+          col = [col[0] + (varN - 0.5) * 12, col[1] + (varN - 0.5) * 10, col[2] + (varN - 0.5) * 8];
+        } else if (c.t === TL.SAND) {
+          const varN = fbm(wx * 0.6, wy * 0.6);
+          col = [col[0] + (varN - 0.5) * 10, col[1] + (varN - 0.5) * 10, col[2] + (varN - 0.5) * 8];
+        } else if (c.t === TL.WATER) {
+          waterWeight += c.w;
+          const varN = fbm(wx * 0.2 + 5.0, wy * 0.2 + 2.0);
+          col = mix3([22, 78, 106], [38, 114, 136], varN);
         }
-        mctx.fillStyle = 'rgba(150,200,120,0.10)';
-        for (let i = 0; i < 3; i++) {
-          mctx.fillRect(p.x - ISO.HW + ((h2(x * 2.1 + i, y * 2.7) * 2 * ISO.HW) | 0), p.y - ISO.HH + ((h2(x * 3.1 + i, y * 1.7) * 2 * ISO.HH) | 0), 1, 1);
-        }
-      } else if (t === TL.SAND) {
-        mctx.fillStyle = 'rgba(156,136,90,0.22)';
-        for (let i = 0; i < 4; i++) {
-          const a = h2(x * 4.1 + i * 7, y * 5.7 + i);
-          mctx.fillRect(p.x - ISO.HW + ((a * 2 * ISO.HW) | 0), p.y - ISO.HH + ((h2(x + i * 2.9, y + i * 1.7) * 2 * ISO.HH) | 0), 1, 1);
-        }
-      } else if (t === TL.WATER) {
-        const dp = fbm(x * 0.3 + 5, y * 0.3 + 2);
-        mctx.fillStyle = rgba(mix3([18, 70, 96], [40, 120, 140], dp), 0.35);
-        mctx.fillRect(p.x - ISO.HW, p.y - ISO.HH, 2 * ISO.HW, 2 * ISO.HH);
-        mctx.fillStyle = 'rgba(150,210,225,0.10)';
-        for (let i = 0; i < 3; i++) {
-          const a = h2(x * 5.1 + i, y * 6.3 + i * 2);
-          if (a > 0.7) mctx.fillRect(p.x - ISO.HW + ((a * 2 * ISO.HW) | 0), p.y - ISO.HH + ((h2(x + i, y * 2 + i) * 2 * ISO.HH) | 0), 1, 1);
+
+        rAcc += col[0] * c.w;
+        gAcc += col[1] * c.w;
+        bAcc += col[2] * c.w;
+      }
+
+      if (waterWeight > 0.15 && waterWeight < 0.85) {
+        const foamN = fbm(wx * 1.2, wy * 1.2);
+        if (foamN > 0.48) {
+          const foamF = (1 - Math.abs(waterWeight - 0.5) * 2) * 0.35;
+          rAcc = rAcc * (1 - foamF) + 225 * foamF;
+          gAcc = gAcc * (1 - foamF) + 238 * foamF;
+          bAcc = bAcc * (1 - foamF) + 242 * foamF;
         }
       }
-      mctx.restore();
+
+      if (distFromC > 0.85) {
+        const fade = Math.min(1, (distFromC - 0.85) / 0.35);
+        rAcc = rAcc * (1 - fade) + deepOcean[0] * fade;
+        gAcc = gAcc * (1 - fade) + deepOcean[1] * fade;
+        bAcc = bAcc * (1 - fade) + deepOcean[2] * fade;
+      }
+
+      data[pIdx] = Math.max(0, Math.min(255, rAcc | 0));
+      data[pIdx + 1] = Math.max(0, Math.min(255, gAcc | 0));
+      data[pIdx + 2] = Math.max(0, Math.min(255, bAcc | 0));
+      data[pIdx + 3] = 255;
     }
   }
 
-  /* foam rim on shore water */
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
-      if (tiles[gi(x, y)] !== TL.WATER) continue;
-      let land = 0;
-      for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (inB(x + d[0], y + d[1]) && tiles[gi(x + d[0], y + d[1])] > 0) land++;
-      }
-      if (land > 0) {
-        const p = iso(x + 0.5, y + 0.5);
-        mctx.save();
-        mctx.globalAlpha = 0.5;
-        mctx.strokeStyle = 'rgba(225,238,240,0.7)';
-        mctx.lineWidth = Math.max(1, ISO.HH * 0.18);
-        mctx.beginPath();
-        mctx.moveTo(p.x, p.y - ISO.HH * 0.7);
-        mctx.lineTo(p.x + ISO.HW * 0.7, p.y);
-        mctx.lineTo(p.x, p.y + ISO.HH * 0.7);
-        mctx.lineTo(p.x - ISO.HW * 0.7, p.y);
-        mctx.closePath();
-        mctx.stroke();
-        mctx.restore();
-      }
-    }
-  }
+  mctx.putImageData(imgData, 0, 0);
 }
 
 export function walkable(x, y) {

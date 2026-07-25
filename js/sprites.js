@@ -11,7 +11,7 @@ function paintSprite(nw, nh, fn) {
 }
 
 function shd(x, cx, cy, rx, ry) {
-  soft(x, cx, cy, rx, ry, 'rgba(10,18,14,0.34)');
+  /* Static shadow removed - rendered dynamically by sun projection system */
 }
 
 function dFlower(x, col) {
