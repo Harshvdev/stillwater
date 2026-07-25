@@ -1,5 +1,5 @@
 import { GRID, C, TL, ET, SEAS_TINT, seasonOf, WH, gi, inB } from './constants.js';
-import { TAU, clamp, lerp, sm, iso, tintInt, initIsoBounds } from './math.js';
+import { TAU, clamp, lerp, sm, iso, tintInt, initIsoBounds, h2, ISO } from './math.js';
 import { tiles, entities, player, walkable, entityAt, mapCv, paintGround } from './world.js';
 import { TEX, texFor, buildSprites, buildTextures } from './sprites.js';
 import { createGroundFilter } from './shaders.js';
@@ -93,9 +93,9 @@ export function initApp() {
   pHalo = new PIXI.Sprite(TEX.dot);
   pHalo.anchor.set(0.5);
   pHalo.blendMode = PIXI.BLEND_MODES.ADD;
-  pHalo.tint = 0xcfe0ff;
-  pHalo.scale.set(2.2);
-  pHalo.alpha = 0;
+  pHalo.tint = 0xffc866;
+  pHalo.scale.set(3.5);
+  pHalo.alpha = 0.35;
   lightC.addChild(pHalo);
 
   return app;
@@ -123,7 +123,13 @@ export function makeSprite(e) {
   t.anchor.set(0.5, 1);
   const bs = WH[e.t] / t.texture.orig.height;
   e._bs = bs;
-  t.scale.set(bs);
+  if (e.t === ET.TREE || e.t === ET.HERO_TREE) {
+    const scaleVar = 0.9 + h2(e.x * 6.3 + 2.1, e.y * 5.7 + 1.9) * 0.22;
+    const flip = h2(e.x * 3.1 + 8.4, e.y * 4.3 + 2.7) > 0.5 ? -1 : 1;
+    t.scale.set(bs * scaleVar * flip, bs * scaleVar);
+  } else {
+    t.scale.set(bs);
+  }
   e.sprite = t;
   entC.addChild(t);
   return t;
@@ -133,7 +139,13 @@ export function retex(e) {
   if (!e.sprite) return;
   e.sprite.texture = texFor(e, state.curSeason);
   e._bs = WH[e.t] / e.sprite.texture.orig.height;
-  e.sprite.scale.set(e._bs);
+  if (e.t === ET.TREE || e.t === ET.HERO_TREE) {
+    const scaleVar = 0.9 + h2(e.x * 6.3 + 2.1, e.y * 5.7 + 1.9) * 0.22;
+    const flip = h2(e.x * 3.1 + 8.4, e.y * 4.3 + 2.7) > 0.5 ? -1 : 1;
+    e.sprite.scale.set(e._bs * scaleVar * flip, e._bs * scaleVar);
+  } else {
+    e.sprite.scale.set(e._bs);
+  }
 }
 
 export function makeHalo(e) {
@@ -546,8 +558,9 @@ export function update(dt, spreadFlowerFn) {
     }
   }
 
-  pHalo.x = pp.x;
-  pHalo.y = pp.y - 12;
+  const isLampLit = state.nightF > 0.01 || state.dusk > 0.01;
+  const lanternPower = isLampLit ? Math.max(state.nightF, state.dusk * 0.85) : 0.0;
+
   pHalo.alpha = 0;
 
   for (const f of flies) {
@@ -602,6 +615,13 @@ export function update(dt, spreadFlowerFn) {
     gu.u_dusk = state.dusk;
     gu.u_golden = golden;
     gu.u_seas = state.sTint;
+
+    const playerScreenX = world.x + (pp.x + 3) * view.z;
+    const playerScreenY = world.y + pp.y * view.z;
+
+    gu.u_lanternPos = [playerScreenX, playerScreenY];
+    gu.u_lanternPower = lanternPower;
+    gu.u_zoom = view.z;
   }
 
   ambT -= dt;

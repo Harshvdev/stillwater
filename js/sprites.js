@@ -44,29 +44,144 @@ function dGlow(x) {
   soft(x, 7, 6.5, 2, 2, 'rgba(220,240,255,0.55)');
 }
 
-function dTree(x, fol, hi, extra) {
-  shd(x, 14, 28, 8.5, 3.6);
-  x.fillStyle = 'rgb(88,60,40)';
-  x.fillRect(12.4, 18, 3.2, 10);
-  soft(x, 14, 12, 9.5, 8.5, rgb(fol));
-  soft(x, 10, 8.5, 5.2, 4.8, rgb(hi));
-  soft(x, 18.5, 15, 5, 4.6, rgba([12, 40, 22, 0.45], 1));
-  soft(x, 13, 5, 3, 2.6, rgba([255, 255, 255, 0.16], 1));
+function dLumpyCanopy(x, trunkInfo, lobes, seasonIdx) {
+  // 1. Trunk (drawn FIRST so lowest lobe swallows the top half of the trunk!)
+  x.fillStyle = trunkInfo.barkColor || 'rgb(78,52,36)';
+  x.beginPath();
+  x.moveTo(trunkInfo.leftRootX, trunkInfo.baseY);
+  x.lineTo(trunkInfo.topX - trunkInfo.topW * 0.5, trunkInfo.topY);
+  x.lineTo(trunkInfo.topX + trunkInfo.topW * 0.5, trunkInfo.topY);
+  x.lineTo(trunkInfo.rightRootX, trunkInfo.baseY);
+  x.closePath();
+  x.fill();
 
-  if (extra === 'blossom') {
-    for (let i = 0; i < 7; i++) {
-      const a = i * 1.7, hh = h2(i * 3.1, i * 1.3);
-      soft(x, 9 + Math.cos(a) * 5 + hh * 2, 9 + Math.sin(a) * 4, 1.5, 1.5, 'rgba(255,210,226,0.85)');
-    }
-  } else if (extra === 'snow') {
-    soft(x, 12, 6, 7, 3, 'rgba(244,248,255,0.92)');
-    soft(x, 16, 9, 4, 2, 'rgba(244,248,255,0.8)');
-  } else if (extra === 'autumn') {
-    for (let i = 0; i < 5; i++) {
-      const a = i * 2.1;
-      soft(x, 11 + Math.cos(a) * 5, 11 + Math.sin(a) * 4, 1.4, 1.4, 'rgba(214,96,52,0.7)');
-    }
+  // Bark shading
+  x.fillStyle = 'rgba(28,16,10,0.5)';
+  x.beginPath();
+  x.moveTo(trunkInfo.topX, trunkInfo.topY);
+  x.lineTo(trunkInfo.topX + trunkInfo.topW * 0.5, trunkInfo.topY);
+  x.lineTo(trunkInfo.rightRootX, trunkInfo.baseY);
+  x.lineTo(trunkInfo.topX, trunkInfo.baseY);
+  x.closePath();
+  x.fill();
+
+  // Season palette config (NEVER ASH GREY!)
+  let baseCol, coolUndersideCol, warmSunCol, accentType;
+
+  if (seasonIdx === 0) { // Spring (blossom / pale living green)
+    baseCol = 'rgb(76,156,98)';
+    coolUndersideCol = 'rgba(18,52,36,0.72)';
+    warmSunCol = 'rgb(172,220,128)';
+    accentType = 'blossom';
+  } else if (seasonIdx === 1) { // Summer (warm living green in sun)
+    baseCol = 'rgb(66,148,74)';
+    coolUndersideCol = 'rgba(14,48,30,0.76)';
+    warmSunCol = 'rgb(160,215,102)';
+    accentType = 'sun';
+  } else if (seasonIdx === 2) { // Autumn (ember in autumn)
+    baseCol = 'rgb(192,86,36)';
+    coolUndersideCol = 'rgba(60,20,14,0.76)';
+    warmSunCol = 'rgb(240,165,52)';
+    accentType = 'autumn';
+  } else { // Winter (frosted pine green, NEVER ASH)
+    baseCol = 'rgb(44,92,78)';
+    coolUndersideCol = 'rgba(12,40,34,0.80)';
+    warmSunCol = 'rgb(86,146,130)';
+    accentType = 'snow';
   }
+
+  // 2. Overlapping Lobes (3 to 5 lobes)
+  lobes.forEach((lb) => {
+    const cx = lb.cx, cy = lb.cy, rx = lb.rx, ry = lb.ry;
+
+    // A) Darker cool underside shadow
+    soft(x, cx + 0.6, cy + ry * 0.35, rx * 0.95, ry * 0.65, coolUndersideCol);
+
+    // B) Main living foliage body
+    soft(x, cx, cy, rx, ry, baseCol);
+
+    // C) Warm sun-kissed top highlight
+    soft(x, cx - rx * 0.25, cy - ry * 0.30, rx * 0.72, ry * 0.52, warmSunCol);
+  });
+
+  // 3. Seasonal detailing overlays
+  if (accentType === 'blossom') {
+    lobes.forEach((lb, i) => {
+      const petals = 3 + (i % 3);
+      for (let p = 0; p < petals; p++) {
+        const a = (p / petals) * TAU + i * 0.8;
+        const px = lb.cx + Math.cos(a) * (lb.rx * 0.6);
+        const py = lb.cy + Math.sin(a) * (lb.ry * 0.6) - 1;
+        soft(x, px, py, 1.6, 1.4, 'rgba(255,214,228,0.88)');
+        soft(x, px - 0.4, py - 0.4, 0.9, 0.8, 'rgba(255,245,248,0.95)');
+      }
+    });
+  } else if (accentType === 'autumn') {
+    lobes.forEach((lb, i) => {
+      const embers = 2 + (i % 3);
+      for (let e = 0; e < embers; e++) {
+        const a = (e / embers) * TAU + i * 1.1;
+        const ex = lb.cx + Math.cos(a) * (lb.rx * 0.5);
+        const ey = lb.cy + Math.sin(a) * (lb.ry * 0.5);
+        soft(x, ex, ey, 1.8, 1.5, 'rgba(255,120,38,0.82)');
+      }
+    });
+  } else if (accentType === 'snow') {
+    lobes.forEach((lb) => {
+      if (lb.cy < trunkInfo.baseY - 12) {
+        soft(x, lb.cx, lb.cy - lb.ry * 0.4, lb.rx * 0.8, lb.ry * 0.38, 'rgba(235,245,248,0.92)');
+      }
+    });
+  }
+}
+
+function dTree(x, seasonIdx = 1, varIdx = 0) {
+  const trunkInfo = {
+    topX: 18,
+    topY: 22,
+    topW: 3.6,
+    baseY: 36,
+    leftRootX: 15.5,
+    rightRootX: 20.5,
+    barkColor: 'rgb(78,52,36)'
+  };
+
+  let lobes;
+  if (varIdx === 1) { // Taller, leaning right
+    lobes = [
+      { cx: 17, cy: 26, rx: 11.5, ry: 9 },  // Lowest lobe swallows trunk top (y=22..32)
+      { cx: 11, cy: 20, rx: 8, ry: 7 },
+      { cx: 25, cy: 18, rx: 9.5, ry: 8.5 },
+      { cx: 21, cy: 11, rx: 9, ry: 8 },
+      { cx: 14, cy: 11, rx: 6, ry: 5 }
+    ];
+  } else if (varIdx === 2) { // Broad & sweeping
+    lobes = [
+      { cx: 18, cy: 24, rx: 14, ry: 10 },   // Lowest lobe swallows trunk top (y=22..32)
+      { cx: 9, cy: 21, rx: 8.5, ry: 7 },
+      { cx: 27, cy: 22, rx: 8.5, ry: 7 },
+      { cx: 18, cy: 14, rx: 10, ry: 8.5 },
+      { cx: 17, cy: 8.5, rx: 6.5, ry: 5.5 }
+    ];
+  } else if (varIdx === 3) { // Asymmetrical twin-crown
+    lobes = [
+      { cx: 19, cy: 25, rx: 12, ry: 9 },    // Lowest lobe swallows trunk top
+      { cx: 12, cy: 18, rx: 9.5, ry: 8 },
+      { cx: 24, cy: 22, rx: 7.5, ry: 6.5 },
+      { cx: 14, cy: 11, rx: 8, ry: 7 },
+      { cx: 23, cy: 12, rx: 7.5, ry: 6.5 }
+    ];
+  } else { // Variant 0 (Default cozy lumpy tree)
+    lobes = [
+      { cx: 18, cy: 25, rx: 12.5, ry: 9.5 }, // Lowest lobe swallows trunk top
+      { cx: 12, cy: 19, rx: 8.5, ry: 7.5 },
+      { cx: 24, cy: 20, rx: 9, ry: 8 },
+      { cx: 17, cy: 13, rx: 9.5, ry: 8.5 },
+      { cx: 20, cy: 9, rx: 6.5, ry: 5.5 }
+    ];
+  }
+
+  dLumpyCanopy(x, trunkInfo, lobes, seasonIdx);
 }
 
 function dStump(x) {
@@ -164,15 +279,27 @@ function dRuin(ctx) {
 
 function dPlayer(x, walk, gt = 0) {
   shd(x, 7, 15, 4.8, 2.3);
-  const b = walk ? Math.sin(walk * 11) * 0.9 : Math.sin(gt * 1.4) * 0.25;
-  soft(x, 7, 10 + b, 4.8, 5.8, 'rgb(74,86,118)');
-  soft(x, 7, 11 + b, 3.3, 3.9, 'rgb(100,114,146)');
-  soft(x, 7, 5 + b, 3.1, 3.1, 'rgb(226,208,184)');
-  soft(x, 6.3, 4.4 + b, 1.5, 1.5, 'rgb(66,50,38)');
-  if (walk) {
-    const lo = Math.sin(walk * 11) * 1.4;
-    disc(x, 5.6, 14 + lo, 1, 'rgb(50,42,36)');
-    disc(x, 8.4, 14 - lo, 1, 'rgb(50,42,36)');
+  const b = walk ? Math.sin(walk * 11) * 0.8 : 0;
+  const isLampLit = typeof state !== 'undefined' && state && (state.nightF > 0.02 || state.dusk > 0.05);
+
+  // Deep indigo-slate cloak body & hood
+  soft(x, 7, 9 + b, 4.8, 5.8, 'rgb(38,48,64)');
+  soft(x, 7, 10 + b, 3.4, 4.2, 'rgb(26,34,46)');
+
+  // Hood top peak
+  disc(x, 7, 5 + b, 2.6, 'rgb(38,48,64)');
+
+  // Deep hood interior shadow
+  disc(x, 7, 5.5 + b, 1.8, 'rgb(18,22,30)');
+
+  // Implied face: SOFT WARM SMUDGE
+  soft(x, 7, 5.5 + b, 1.2, 1.1, 'rgba(255, 225, 160, 0.85)');
+
+  // Lantern (only at dusk / night!)
+  if (isLampLit) {
+    soft(x, 10.5, 9.5 + b, 2.4, 2.4, 'rgba(255, 190, 70, 0.85)');
+    disc(x, 10.5, 9.5 + b, 1.4, 'rgb(45,34,24)');
+    soft(x, 10.5, 9.5 + b, 0.9, 0.9, 'rgb(255,255,230)');
   }
 }
 
@@ -233,43 +360,48 @@ function dDriftwood(x) {
   disc(x, 11, 8.8, 0.8, 'rgb(95,80,64)');
 }
 
-function dHeroTree(x, fol, hi, extra) {
-  // Single, solid, majestic trunk
-  x.fillStyle = 'rgb(76,52,34)';
-  x.beginPath();
-  x.moveTo(13, 42); // left root flare
-  x.lineTo(15.5, 20); // left top near canopy
-  x.lineTo(20.5, 20); // right top near canopy
-  x.lineTo(23, 42); // right root flare
-  x.closePath();
-  x.fill();
+function dHeroTree(x, seasonIdx = 1, varIdx = 0) {
+  const trunkInfo = {
+    topX: 24,
+    topY: 28,
+    topW: 5.5,
+    baseY: 52,
+    leftRootX: 19,
+    rightRootX: 29,
+    barkColor: 'rgb(72,48,32)'
+  };
 
-  // Root flares & bark texture shading
-  soft(x, 13.5, 41.5, 3.2, 1.8, 'rgb(58,38,22)');
-  soft(x, 22.5, 41.5, 3.2, 1.8, 'rgb(58,38,22)');
-  soft(x, 17, 30, 2.2, 9, 'rgb(98,72,48)');
-
-  // Main grand canopy layers
-  soft(x, 18, 17, 15.5, 13.5, rgb(fol));
-  soft(x, 12, 13, 8.5, 7.8, rgb(hi));
-  soft(x, 24, 14, 8, 7.5, rgb(hi));
-  soft(x, 18, 8.5, 7.5, 6.5, rgba([255, 255, 255, 0.22], 1));
-  soft(x, 23, 22, 7.5, 6.8, rgba([10, 36, 18, 0.5], 1));
-
-  if (extra === 'blossom') {
-    for (let i = 0; i < 11; i++) {
-      const a = i * 1.5, hh = h2(i * 4.1, i * 2.3);
-      soft(x, 12 + Math.cos(a) * 8 + hh * 3, 13 + Math.sin(a) * 6, 2.0, 2.0, 'rgba(255,215,230,0.9)');
-    }
-  } else if (extra === 'snow') {
-    soft(x, 16, 8, 10, 4.2, 'rgba(244,248,255,0.95)');
-    soft(x, 22, 12, 6, 3, 'rgba(244,248,255,0.85)');
-  } else if (extra === 'autumn') {
-    for (let i = 0; i < 9; i++) {
-      const a = i * 1.9;
-      soft(x, 15 + Math.cos(a) * 8, 15 + Math.sin(a) * 6, 2.1, 2.1, 'rgba(224,106,58,0.75)');
-    }
+  let lobes;
+  if (varIdx === 1) {
+    lobes = [
+      { cx: 24, cy: 35, rx: 17, ry: 12.5 },  // Swallow trunk top (y=28..45)
+      { cx: 13, cy: 28, rx: 11.5, ry: 9.5 },
+      { cx: 35, cy: 27, rx: 13, ry: 10.5 },
+      { cx: 22, cy: 19, rx: 14, ry: 11.5 },
+      { cx: 16, cy: 12, rx: 9.5, ry: 8 },
+      { cx: 31, cy: 13, rx: 10, ry: 8.5 }
+    ];
+  } else if (varIdx === 2) {
+    lobes = [
+      { cx: 24, cy: 33, rx: 18.5, ry: 13.5 },
+      { cx: 12, cy: 26, rx: 12.5, ry: 10 },
+      { cx: 36, cy: 29, rx: 11.5, ry: 9.5 },
+      { cx: 25, cy: 21, rx: 15, ry: 12 },
+      { cx: 19, cy: 12, rx: 10.5, ry: 9 },
+      { cx: 29, cy: 11, rx: 9, ry: 7.5 }
+    ];
+  } else {
+    lobes = [
+      { cx: 24, cy: 34, rx: 17.5, ry: 13 },  // Swallow trunk top (y=28..44)
+      { cx: 14, cy: 27, rx: 12, ry: 10 },
+      { cx: 34, cy: 28, rx: 12.5, ry: 10.5 },
+      { cx: 24, cy: 20, rx: 14.5, ry: 12 },
+      { cx: 18, cy: 13, rx: 10, ry: 8.5 },
+      { cx: 30, cy: 12, rx: 9.5, ry: 8 }
+    ];
   }
+
+  dLumpyCanopy(x, trunkInfo, lobes, seasonIdx);
 }
 
 function dDot(x) {
@@ -280,14 +412,14 @@ export const CV = {};
 export const TEX = {};
 
 export function buildSprites() {
-  CV.tree0 = paintSprite(28, 32, (x) => dTree(x, [82, 140, 92], [150, 200, 140], 'blossom'));
-  CV.tree1 = paintSprite(28, 32, (x) => dTree(x, [78, 146, 82], [150, 206, 138], null));
-  CV.tree2 = paintSprite(28, 32, (x) => dTree(x, [186, 128, 64], [224, 176, 110], 'autumn'));
-  CV.tree3 = paintSprite(28, 32, (x) => dTree(x, [120, 134, 142], [176, 188, 196], 'snow'));
-  CV.heroTree0 = paintSprite(36, 44, (x) => dHeroTree(x, [82, 140, 92], [150, 200, 140], 'blossom'));
-  CV.heroTree1 = paintSprite(36, 44, (x) => dHeroTree(x, [78, 146, 82], [150, 206, 138], null));
-  CV.heroTree2 = paintSprite(36, 44, (x) => dHeroTree(x, [186, 128, 64], [224, 176, 110], 'autumn'));
-  CV.heroTree3 = paintSprite(36, 44, (x) => dHeroTree(x, [120, 134, 142], [176, 188, 196], 'snow'));
+  for (let s = 0; s < 4; s++) {
+    for (let v = 0; v < 4; v++) {
+      CV['tree_' + s + '_' + v] = paintSprite(36, 40, (x) => dTree(x, s, v));
+      CV['heroTree_' + s + '_' + v] = paintSprite(48, 56, (x) => dHeroTree(x, s, v));
+    }
+    CV['tree' + s] = CV['tree_' + s + '_0'];
+    CV['heroTree' + s] = CV['heroTree_' + s + '_0'];
+  }
   CV.driftwood = paintSprite(20, 14, dDriftwood);
   for (let c = 0; c < 5; c++) CV['flower' + c] = paintSprite(14, 14, (x) => dFlower(x, FC[c]));
   CV.glow = paintSprite(14, 14, dGlow);
@@ -314,10 +446,14 @@ export function buildTextures() {
 
 export function texFor(e, curSeasonIdx = state.curSeason) {
   switch (e.t) {
-    case ET.TREE:
-      return TEX['tree' + curSeasonIdx];
-    case ET.HERO_TREE:
-      return TEX['heroTree' + curSeasonIdx];
+    case ET.TREE: {
+      const v = (e.data && e.data.v !== undefined) ? (e.data.v % 4) : 0;
+      return TEX['tree_' + curSeasonIdx + '_' + v] || TEX['tree' + curSeasonIdx];
+    }
+    case ET.HERO_TREE: {
+      const v = (e.data && e.data.v !== undefined) ? (e.data.v % 4) : 0;
+      return TEX['heroTree_' + curSeasonIdx + '_' + v] || TEX['heroTree' + curSeasonIdx];
+    }
     case ET.DRIFTWOOD:
       return TEX.driftwood;
     case ET.FLOWER:

@@ -156,133 +156,145 @@ export function drawPlayerCanvas() {
   ctx.clearRect(0, 0, 64, 64);
 
   const cx = 32;
-  const cy = 40 + pState.bounceY;
-  const radius = 16;
+  const cy = 38 + pState.bounceY;
+
+  // Check if lantern should be lit/visible (Dusk or Night ONLY, disappears in daytime!)
+  const isLampLit = typeof state !== 'undefined' && state && (state.nightF > 0.02 || state.dusk > 0.05);
 
   // --- 1. Soft Ground Shadow ---
   ctx.save();
-  ctx.fillStyle = 'rgba(12, 20, 16, 0.28)';
+  ctx.fillStyle = 'rgba(12, 18, 24, 0.32)';
   ctx.beginPath();
-  ctx.ellipse(32, 57, 14 * pState.squashX, 4.5 * pState.squashY, 0, 0, TAU);
+  ctx.ellipse(32, 57, 13 * pState.squashX, 4.2 * pState.squashY, 0, 0, TAU);
   ctx.fill();
   ctx.restore();
 
-  // --- 2. Cute Warm Body Sphere (Soft Butter-Cream / Warm Honey-Ivory) ---
+  // --- 2. Cloaked Traveler Silhouette (Cozy, Dark Slate-Indigo Cloak) ---
   ctx.save();
-
-  // Apply squash & stretch around sphere center
   ctx.translate(cx, cy);
   ctx.scale(pState.squashX, pState.squashY);
   ctx.translate(-cx, -cy);
 
-  // Radial gradient for warm, adorable cozy body
-  const grad = ctx.createRadialGradient(
-    cx - radius * 0.35,
-    cy - radius * 0.35,
-    1,
-    cx,
-    cy,
-    radius
-  );
-  grad.addColorStop(0, '#fffaf0');    // Soft warm highlight
-  grad.addColorStop(0.40, '#f9edd6');  // Cute butter-cream main body
-  grad.addColorStop(0.78, '#e6d0a7');  // Warm soft shadow transition
-  grad.addColorStop(1.0, '#cfb383');   // Soft ambient rim shadow
+  // Main Cloak Silhouette Body (A-line trailing cloak from hood to ground)
+  const cloakGrad = ctx.createLinearGradient(cx, cy - 22, cx, cy + 16);
+  cloakGrad.addColorStop(0, '#2e3848');   // Top of hood / cowl
+  cloakGrad.addColorStop(0.5, '#222b38'); // Mid cloak body
+  cloakGrad.addColorStop(1, '#171e28');   // Lower cloak hem
 
-  ctx.fillStyle = grad;
+  ctx.fillStyle = cloakGrad;
   ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, TAU);
+  ctx.moveTo(cx, cy - 22);
+  ctx.bezierCurveTo(cx + 8, cy - 20, cx + 13, cy - 12, cx + 13, cy);
+  ctx.bezierCurveTo(cx + 14, cy + 10, cx + 12, cy + 16, cx + 7, cy + 16);
+  ctx.lineTo(cx - 7, cy + 16);
+  ctx.bezierCurveTo(cx - 12, cy + 16, cx - 14, cy + 10, cx - 13, cy);
+  ctx.bezierCurveTo(cx - 13, cy - 12, cx - 8, cy - 20, cx, cy - 22);
+  ctx.closePath();
   ctx.fill();
 
-  // Soft warm inner rim definition
-  ctx.strokeStyle = 'rgba(180, 150, 110, 0.22)';
+  // Soft rim highlight on sunlit top of hood
+  ctx.strokeStyle = 'rgba(165, 190, 215, 0.26)';
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // --- 3. Eyes Rendering (Solid, Thick, Simple Vertical Rectangles, No Sclera Illusion) ---
-  const totalOffsetX = clamp(pState.faceX + pState.gazeX, -9, 9);
-  const totalOffsetY = clamp(pState.faceY + pState.gazeY, -6, 5);
+  // Dark inner cloak fold shading
+  ctx.fillStyle = 'rgba(14, 18, 25, 0.55)';
+  ctx.beginPath();
+  ctx.moveTo(cx - 2, cy - 6);
+  ctx.lineTo(cx - 4, cy + 16);
+  ctx.lineTo(cx + 1, cy + 16);
+  ctx.lineTo(cx + 2, cy - 6);
+  ctx.closePath();
+  ctx.fill();
 
-  // 3D sphere back-facing check:
-  // When character moves/faces upward (totalOffsetY < -0.8), face turns to the back of the sphere
-  let faceAlpha = 1.0;
-  if (totalOffsetY < -0.8) {
-    faceAlpha = clamp(1.0 - (-0.8 - totalOffsetY) / 1.4, 0, 1);
-  }
+  // --- 3. Hood Recess & Tender Implied Face Smudge ---
+  const faceCenterX = cx + pState.faceX * 0.6;
+  const faceCenterY = cy - 12 + pState.faceY * 0.45;
 
-  if (faceAlpha <= 0.01) {
-    ctx.restore();
-    return;
-  }
+  ctx.fillStyle = '#141822';
+  ctx.beginPath();
+  ctx.ellipse(faceCenterX, faceCenterY, 5.2, 5.8, 0, 0, TAU);
+  ctx.fill();
 
-  ctx.globalAlpha = faceAlpha;
+  // Soft warm face smudge
+  const faceSmudge = ctx.createRadialGradient(
+    faceCenterX, faceCenterY, 0.4,
+    faceCenterX, faceCenterY, 4.8
+  );
+  faceSmudge.addColorStop(0, 'rgba(255, 238, 190, 0.90)');
+  faceSmudge.addColorStop(0.45, 'rgba(255, 195, 120, 0.55)');
+  faceSmudge.addColorStop(1, 'rgba(220, 150, 70, 0)');
 
-  const isSinging = typeof state !== 'undefined' && state && (state.gt - state.lastSing < 1.8);
+  ctx.fillStyle = faceSmudge;
+  ctx.beginPath();
+  ctx.ellipse(faceCenterX, faceCenterY, 4.8, 4.5, 0, 0, TAU);
+  ctx.fill();
 
-  const baseEyeDist = 5.8; // Distance apart
-  const baseEyeW = 3.8;   // Thick solid vertical rectangle
-  const baseEyeH = 7.0;   // Vertically elongated
-  const cornerRadius = 1.2; // Slightly rounded rectangle
+  // --- 4. Lantern (Disappears completely in Daytime!) ---
+  if (isLampLit) {
+    const lanternX = cx + 11 + pState.faceX * 0.3;
+    const lanternY = cy + 2 + pState.bounceY * 0.4;
 
-  // Blinking factor (1 -> 0 -> 1)
-  let eyeHFactor = 1;
-  if (pState.isBlinking) {
-    const b = Math.sin(pState.blinkProgress * Math.PI);
-    eyeHFactor = Math.max(0.08, 1 - b);
-  }
+    // Soft warm golden light illuminated on traveler's cloak facing lantern
+    const cloakLight = ctx.createRadialGradient(
+      lanternX - 2, lanternY - 2, 2,
+      cx + 4, cy + 2, 14
+    );
+    cloakLight.addColorStop(0, 'rgba(255, 205, 105, 0.52)');
+    cloakLight.addColorStop(0.5, 'rgba(255, 160, 50, 0.25)');
+    cloakLight.addColorStop(1, 'rgba(255, 120, 20, 0)');
+    ctx.fillStyle = cloakLight;
+    ctx.beginPath();
+    ctx.ellipse(cx + 6, cy + 2, 6, 9, 0, 0, TAU);
+    ctx.fill();
 
-  const faceCenterY = cy + 0.5 + totalOffsetY; // Cute low eye placement
+    // Fine chain connecting lantern to traveler's arm
+    ctx.strokeStyle = '#3a2e22';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx + 7, cy - 2);
+    ctx.lineTo(lanternX, lanternY - 4);
+    ctx.stroke();
 
-  // Solid, clean dark charcoal color with zero shadow blur (no sclera illusion!)
-  ctx.fillStyle = '#1a1715';
-  ctx.strokeStyle = '#1a1715';
+    // Dark antique brass frame base
+    ctx.fillStyle = '#241c14';
+    ctx.fillRect(lanternX - 2.5, lanternY - 3.5, 5, 7);
 
-  for (let side of [-1, 1]) {
-    const eyeRelX = totalOffsetX + side * baseEyeDist;
-    const eyeX = cx + eyeRelX;
-    const eyeY = faceCenterY;
+    // Glowing warm glass chamber
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(lanternX - 1.8, lanternY - 2.8, 3.6, 5.6);
 
-    // 3D Sphere foreshortening factor z
-    const normX = eyeRelX / radius;
-    const z = Math.sqrt(Math.max(0, 1 - normX * normX));
+    // Flame core INSIDE the glass
+    ctx.fillStyle = '#fff0a5';
+    ctx.beginPath();
+    ctx.ellipse(lanternX, lanternY - 0.2, 1.3, 2.0, 0, 0, TAU);
+    ctx.fill();
 
-    if (z < 0.15) continue; // Hidden behind sphere curvature
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(lanternX, lanternY - 0.2, 0.7, 1.2, 0, 0, TAU);
+    ctx.fill();
 
-    const eyeW = Math.max(1.4, baseEyeW * z);
+    // Antique brass cap
+    ctx.fillStyle = '#32251a';
+    ctx.beginPath();
+    ctx.arc(lanternX, lanternY - 3.5, 2.5, Math.PI, TAU);
+    ctx.fill();
 
-    if (isSinging) {
-      // Singing expression: Happy squints ^ ^
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      const arcR = 3.0 * z;
-      ctx.arc(eyeX, eyeY + 1, arcR, Math.PI * 1.15, Math.PI * 1.85);
-      ctx.stroke();
-    } else if (eyeHFactor < 0.28) {
-      // Closed / Blinking eye (solid line)
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.moveTo(eyeX - eyeW * 0.6, eyeY);
-      ctx.lineTo(eyeX + eyeW * 0.6, eyeY);
-      ctx.stroke();
-    } else {
-      // Solid, thick, vertical, rectangular eyes (no shadow blur, clean edges)
-      const currentEyeH = baseEyeH * eyeHFactor;
-      const rx = eyeW * 0.5;
-      const ry = currentEyeH * 0.5;
-      const r = Math.min(cornerRadius, rx, ry);
+    // Natural, tight glowing aura around the lantern glass
+    const lampGlow = ctx.createRadialGradient(
+      lanternX, lanternY - 0.2, 0.8,
+      lanternX, lanternY - 0.2, 9.5
+    );
+    lampGlow.addColorStop(0, 'rgba(255, 255, 240, 0.95)');
+    lampGlow.addColorStop(0.3, 'rgba(255, 210, 100, 0.68)');
+    lampGlow.addColorStop(0.7, 'rgba(255, 150, 40, 0.28)');
+    lampGlow.addColorStop(1, 'rgba(255, 100, 0, 0)');
 
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(eyeX - rx, eyeY - ry, eyeW, currentEyeH, [r]);
-      } else {
-        ctx.save();
-        ctx.translate(eyeX, eyeY);
-        ctx.scale(rx, ry);
-        ctx.arc(0, 0, 1, 0, TAU);
-        ctx.restore();
-      }
-      ctx.fill();
-    }
+    ctx.fillStyle = lampGlow;
+    ctx.beginPath();
+    ctx.arc(lanternX, lanternY - 0.2, 9.5, 0, TAU);
+    ctx.fill();
   }
 
   ctx.restore();
