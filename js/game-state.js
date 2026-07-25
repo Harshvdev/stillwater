@@ -1,6 +1,13 @@
 import { SEAS_TINT } from './constants.js';
+import { ISO } from './math.js';
 
-export const INITZ = window.innerWidth < 760 ? 0.85 : 1.2;
+export function getMinZoom() {
+  const reqW = window.innerWidth / (ISO.CANW || 1728);
+  const reqH = window.innerHeight / (ISO.CANH || 960);
+  return Math.max(1.05, Math.max(reqW, reqH) * 1.08);
+}
+
+export const INITZ = Math.max(getMinZoom(), window.innerWidth < 760 ? 1.1 : 1.35);
 
 export const S = {
   seed: (Math.random() * 1e9) | 0,

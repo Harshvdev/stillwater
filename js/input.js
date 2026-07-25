@@ -1,5 +1,5 @@
 import { clamp } from './math.js';
-import { view, mouse } from './game-state.js';
+import { view, mouse, getMinZoom } from './game-state.js';
 import { sing, actAt } from './actions.js';
 
 export const keys = {};
@@ -56,7 +56,7 @@ export function setupInput(appView) {
     if (pinch && ptrs.size >= 2) {
       const p = [...ptrs.values()];
       const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
-      if (pinch.d0 > 0) view.zt = clamp((pinch.s0 * pinch.d0) / Math.max(d, 20), 0.6, 2.0);
+      if (pinch.d0 > 0) view.zt = clamp((pinch.s0 * pinch.d0) / Math.max(d, 20), getMinZoom(), 2.4);
       return;
     }
 
@@ -91,7 +91,7 @@ export function setupInput(appView) {
     'wheel',
     (e) => {
       e.preventDefault();
-      view.zt = clamp(view.zt * Math.exp(-e.deltaY * 0.0013), 0.6, 2.0);
+      view.zt = clamp(view.zt * Math.exp(-e.deltaY * 0.0013), getMinZoom(), 2.4);
     },
     { passive: false }
   );

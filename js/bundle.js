@@ -154,7 +154,12 @@ function iso(gx, gy) {
 
 
 /* --- game-state.js --- */
-const INITZ = window.innerWidth < 760 ? 0.85 : 1.2;
+function getMinZoom() {
+  const reqW = window.innerWidth / (ISO.CANW || 1728);
+  const reqH = window.innerHeight / (ISO.CANH || 960);
+  return Math.max(1.05, Math.max(reqW, reqH) * 1.08);
+}
+const INITZ = Math.max(getMinZoom(), window.innerWidth < 760 ? 1.1 : 1.35);
 const S = {
   seed: (Math.random() * 1e9) | 0,
   worldDay: 0.22
@@ -944,7 +949,7 @@ function setupInput(appView) {
     if (pinch && ptrs.size >= 2) {
       const p = [...ptrs.values()];
       const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
-      if (pinch.d0 > 0) view.zt = clamp((pinch.s0 * pinch.d0) / Math.max(d, 20), 0.6, 2.0);
+      if (pinch.d0 > 0) view.zt = clamp((pinch.s0 * pinch.d0) / Math.max(d, 20), getMinZoom(), 2.4);
       return;
     }
 
@@ -979,7 +984,7 @@ function setupInput(appView) {
     'wheel',
     (e) => {
       e.preventDefault();
-      view.zt = clamp(view.zt * Math.exp(-e.deltaY * 0.0013), 0.6, 2.0);
+      view.zt = clamp(view.zt * Math.exp(-e.deltaY * 0.0013), getMinZoom(), 2.4);
     },
     { passive: false }
   );
@@ -1235,7 +1240,10 @@ function update(dt, spreadFlowerFn) {
   view.ty = pp.y;
   view.cx += (view.tx - view.cx) * Math.min(1, dt * 2.4);
   view.cy += (view.ty - view.cy) * Math.min(1, dt * 2.4);
+  const minZ = getMinZoom();
+  view.zt = clamp(view.zt, minZ, 2.4);
   view.z += (view.zt - view.z) * Math.min(1, dt * 6);
+  view.z = Math.max(minZ, view.z);
 
   world.scale.set(view.z);
   world.x = app.screen.width / 2 - view.cx * view.z;

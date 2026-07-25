@@ -3,7 +3,7 @@ import { TAU, clamp, lerp, sm, iso, tintInt, initIsoBounds } from './math.js';
 import { tiles, entities, player, walkable, entityAt, mapCv, paintGround } from './world.js';
 import { TEX, texFor, buildSprites, buildTextures } from './sprites.js';
 import { createGroundFilter } from './shaders.js';
-import { state, view, regrow, ripples, mouse, S } from './game-state.js';
+import { state, view, regrow, ripples, mouse, S, getMinZoom } from './game-state.js';
 import { whisper, mem, AMB, memSet } from './whisper.js';
 import { save } from './storage.js';
 import { keys, touchVec } from './input.js';
@@ -266,7 +266,10 @@ export function update(dt, spreadFlowerFn) {
   view.ty = pp.y;
   view.cx += (view.tx - view.cx) * Math.min(1, dt * 2.4);
   view.cy += (view.ty - view.cy) * Math.min(1, dt * 2.4);
+  const minZ = getMinZoom();
+  view.zt = clamp(view.zt, minZ, 2.4);
   view.z += (view.zt - view.z) * Math.min(1, dt * 6);
+  view.z = Math.max(minZ, view.z);
 
   world.scale.set(view.z);
   world.x = app.screen.width / 2 - view.cx * view.z;
