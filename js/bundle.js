@@ -399,20 +399,53 @@ function dReed(x) {
   soft(x, 7, 7, 1.5, 1.5, 'rgb(140,180,108)');
 }
 
-function dRuin(x) {
-  shd(x, 8, 14, 6, 2.4);
-  x.fillStyle = 'rgb(166,166,176)';
-  x.fillRect(3, 3, 10, 11);
-  x.fillStyle = 'rgb(136,136,150)';
-  x.fillRect(3, 3, 10, 3);
-  x.strokeStyle = 'rgba(84,84,102,.7)';
-  x.lineWidth = 1;
-  x.beginPath();
-  x.moveTo(7, 3);
-  x.lineTo(9, 8);
-  x.lineTo(6, 14);
-  x.stroke();
-  soft(x, 4, 12, 2, 1.6, 'rgba(106,156,86,.6)');
+function dRuin(ctx) {
+  shd(ctx, 8, 14, 6.5, 2.6);
+
+  // Left Face (dark shade)
+  ctx.fillStyle = 'rgb(108,114,124)';
+  ctx.beginPath();
+  ctx.moveTo(8, 4);
+  ctx.lineTo(3, 7);
+  ctx.lineTo(3, 13);
+  ctx.lineTo(8, 15);
+  ctx.closePath();
+  ctx.fill();
+
+  // Right Face (medium shade)
+  ctx.fillStyle = 'rgb(140,146,158)';
+  ctx.beginPath();
+  ctx.moveTo(8, 4);
+  ctx.lineTo(13, 7);
+  ctx.lineTo(13, 13);
+  ctx.lineTo(8, 15);
+  ctx.closePath();
+  ctx.fill();
+
+  // Top Face (sunlit top facet)
+  ctx.fillStyle = 'rgb(182,188,198)';
+  ctx.beginPath();
+  ctx.moveTo(8, 1);
+  ctx.lineTo(13, 4);
+  ctx.lineTo(8, 7);
+  ctx.lineTo(3, 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Edge crease & ancient crack detail
+  ctx.strokeStyle = 'rgba(54,58,66,0.75)';
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(8, 4);
+  ctx.lineTo(8, 15);
+  ctx.moveTo(8, 4);
+  ctx.lineTo(6, 8);
+  ctx.lineTo(9, 12);
+  ctx.stroke();
+
+  // Moss accretion at base
+  soft(ctx, 5, 13, 2.4, 1.5, 'rgba(92,148,76,0.7)');
+  soft(ctx, 11, 13.5, 2.0, 1.3, 'rgba(80,134,66,0.6)');
 }
 
 function dPlayer(x, walk, gt = 0) {
