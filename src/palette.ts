@@ -16,6 +16,21 @@ export const PALETTE = {
   flowerYellow: 0xe8b028,
   flowerPink: 0xe87aa0,
 
+  // tree bark - a grey-brown, cooler than the earth ramp, so a trunk reads as
+  // wood rather than as a slice of the cliff it stands on
+  bark: [0x8a6a48, 0x77593b, 0x63482f],
+
+  // Leaves. Lifted and warmed toward Minecraft's oak green, which sits around
+  // 1.35x the luminance of the previous near-black green.
+  //
+  // Still clearly darker than the grass cap, and that constraint is what caps
+  // how light this can go: against the darkest grass entry (0x74bb4b) this
+  // ramp's lightest cube holds 1.39:1 contrast, while pushing further toward
+  // Minecraft's yellow-green drops to 1.05:1 and the canopy disappears into
+  // the meadow at the default zoom. Hue is nudged off the grass ramp's too,
+  // so the two separate on more than just brightness.
+  leaf: [0x5c9e42, 0x4e8c39, 0x41762f],
+
   // sand cap tops
   sand: [0xf7e8bd, 0xf2ddab, 0xe6c98f, 0xd8b878],
 

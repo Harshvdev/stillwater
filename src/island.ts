@@ -20,7 +20,10 @@ function smooth(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-const WIDTH_SCALE = 1.3;
+// The island is squashed on z before its radius is measured, so it is wider
+// than it is deep. Exported because the trees measure their distance from the
+// centre on the same basis, to stay consistent with groundHeight.
+export const WIDTH_SCALE = 1.3;
 
 // continuous island + seabed height, ported from the original
 export function groundHeight(x: number, z: number): number {
@@ -109,8 +112,8 @@ const GRASS_HI = 2.2; // the interior rises one voxel above the grass rim
 // MIN_LEVEL via levelOf's floor, so the whole cliff face is uniformly stepped.
 const LEVEL_SHELF = 0; // wet shelf, top flush with the waterline
 const LEVEL_BEACH = 1; // beach
-const LEVEL_GRASS = 2; // grass rim
-const LEVEL_GRASS_HI = 3; // grass interior plateau
+export const LEVEL_GRASS = 2; // grass rim
+export const LEVEL_GRASS_HI = 3; // grass interior plateau
 
 function levelOf(h: number): number {
   if (h > GRASS_HI) return LEVEL_GRASS_HI; // grass interior plateau

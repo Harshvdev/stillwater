@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createIsland, createFlowers, levelAtWorld, VOXEL, SEA_Y } from './island';
 import { createWater, updateWater } from './water';
+import { createTrees } from './trees';
 import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
@@ -40,6 +41,7 @@ function main(): void {
   scene.add(sun);
 
   scene.add(createIsland());
+  scene.add(createTrees());
   scene.add(createFlowers());
 
   const { mesh: water, ocean } = createWater();

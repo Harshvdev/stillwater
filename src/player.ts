@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VOXEL, SEA_Y, levelAtWorld } from './island';
 import { getMoveInput } from './input';
+import { treeBlocks } from './trees';
 import { PALETTE } from './palette';
 
 const SPEED = 6;
@@ -109,6 +110,10 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
     const fromY = player.position.y;
 
     const canOccupy = (x: number, z: number, y: number): boolean => {
+      // a tree trunk is solid. Tested before the terrain so the player cannot
+      // slide into a trunk on the way to a legal step. The canopy is well
+      // above head height and does not block.
+      if (treeBlocks(x, z, FOOT_R)) return false;
       const targetY = surfaceLevel(x, z) * VOXEL;
       if (SEA_Y - targetY > STOP_DEPTH) return false; // too deep to wade
       return targetY - y <= MAX_STEP; // too tall a step to climb
