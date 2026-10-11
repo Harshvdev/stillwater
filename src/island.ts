@@ -194,13 +194,25 @@ const EDGE_HALF = VOXEL * 0.085;
 const edgeColor = new THREE.Color().setHex(PALETTE.edgeLine, THREE.SRGBColorSpace);
 const EDGE_COL_GLSL = `vec3(${edgeColor.r.toFixed(4)}, ${edgeColor.g.toFixed(4)}, ${edgeColor.b.toFixed(4)})`;
 
-export function voxelMaterial(opts: { bands?: boolean; outline?: boolean } = {}): THREE.MeshLambertMaterial {
+export function voxelMaterial(opts: { bands?: boolean; outline?: boolean; fade?: boolean } = {}): THREE.MeshLambertMaterial {
   const bands = opts.bands === true;
   const outline = opts.outline === true;
+  const fade = opts.fade === true;
+  // `fade` reads a per-instance aFade (1 = solid, lower = see-through) and
+  // punches a screen-door dither of holes rather than blending with alpha.
+  //
+  // It is deliberately NOT transparent:true. Real alpha moves the mesh into
+  // three's transparent queue, which sorts whole objects by distance instead
+  // of by fragment: a see-through tree then draws over the player while the
+  // player's shadow - a separate transparent object - sorts differently, so the
+  // body vanishes and only the shadow shows through. Keeping the material
+  // opaque and discarding a fraction of fragments leaves depth writes, sorting
+  // and the player's own draw order completely untouched. It also suits the
+  // GBA look, where transparency was done with a stipple anyway.
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   // every variant compiles from one onBeforeCompile source, so the cache key has
   // to name exactly which combination this material is
-  mat.customProgramCacheKey = () => `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}`;
+  mat.customProgramCacheKey = () => `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}`;
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -210,7 +222,8 @@ attribute vec3 aTop;
 varying vec3 vTopColor;
 varying float vTopMix;
 ${bands ? 'attribute float aBandTop;\nvarying float vBandTop;\nvarying float vWorldY;' : ''}
-${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}`
+${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}
+${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
@@ -218,7 +231,8 @@ ${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal
 vTopColor = aTop;
 vTopMix = step(0.5, normal.y);
 ${bands ? 'vBandTop = aBandTop;\nvWorldY = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;' : ''}
-${outline ? 'vExpose = aExpose;\nvLocal = position;' : ''}`
+${outline ? 'vExpose = aExpose;\nvLocal = position;' : ''}
+${fade ? 'vFade = aFade;' : ''}`
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -238,7 +252,20 @@ ${outline ? `varying vec2 vExpose;
 varying vec3 vLocal;
 const float EDGE_HALF = ${EDGE_HALF.toFixed(4)};
 const vec3 EDGE_COL = ${EDGE_COL_GLSL};
-const float EDGE_VOXEL = ${VOXEL.toFixed(1)};` : ''}`
+const float EDGE_VOXEL = ${VOXEL.toFixed(1)};` : ''}
+${fade ? `varying float vFade;
+// 4x4 ordered dither, 0..15, as a pure function of screen position. Declared
+// here rather than inline in main(), where GLSL will not accept a definition.
+float bayer4(vec2 c) {
+  ivec2 p = ivec2(mod(c, 4.0));
+  int x = p.x, y = p.y;
+  int v = 0;
+  v += ((x ^ y) & 1) * 8;
+  v += ((y) & 1) * 4;
+  v += (((x & 2) >> 1) ^ ((y & 2) >> 1)) * 2;
+  v += ((y & 2) >> 1);
+  return float(v) / 16.0;
+}` : ''}`
       )
       .replace(
         '#include <color_fragment>',
@@ -258,7 +285,16 @@ float hx = max(EDGE_HALF, wx * 0.75);
 float hz = max(EDGE_HALF, wz * 0.75);
 float lineX = (1.0 - smoothstep(hx - wx, hx + wx, edgeX)) * vExpose.x;
 float lineZ = (1.0 - smoothstep(hz - wz, hz + wz, edgeZ)) * vExpose.y;
-diffuseColor.rgb = mix(diffuseColor.rgb, EDGE_COL, max(lineX, lineZ) * vTopMix);` : ''}`
+diffuseColor.rgb = mix(diffuseColor.rgb, EDGE_COL, max(lineX, lineZ) * vTopMix);` : ''}
+${fade ? `// Per-instance occlusion fade, as an ordered screen-door dither rather
+// than alpha blending. aFade is 1 for a solid tree and drops toward FADE_MIN
+// for one standing between the camera and the player.
+//
+// The 4x4 Bayer threshold is a fixed function of gl_FragCoord, so the pattern
+// is stable in screen space: it does not crawl when the camera pans, and it
+// quantises cleanly onto the low-resolution render buffer this game draws at.
+// aFade >= 1 keeps every fragment, so an unoccluded tree is untouched.
+if (vFade < bayer4(gl_FragCoord.xy)) discard;` : ''}`
       );
   };
   return mat;

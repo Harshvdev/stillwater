@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createIsland, createFlowers, levelAtWorld, VOXEL, SEA_Y } from './island';
 import { createWater, updateWater } from './water';
-import { createTrees } from './trees';
+import { createTrees, updateTreeFade } from './trees';
 import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
@@ -70,6 +70,9 @@ function main(): void {
     sand.update(dt, player.position);
     updateWater(t);
     updateCamera(camera, player.position);
+    // fade anything standing between the camera and the player, after the
+    // camera has settled on its new position
+    updateTreeFade(player.position);
     renderer.render(scene, camera);
   });
 
@@ -86,6 +89,7 @@ function main(): void {
       updatePlayer(player, dt);
       sand.update(dt, player.position);
       updateWater(t);
+      updateTreeFade(player.position);
     },
     // average ms per render call, bypassing rAF throttling in headless browsers
     __renderMs: (n = 20): number => {

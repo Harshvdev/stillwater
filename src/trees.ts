@@ -86,6 +86,111 @@ const MAX_LEAVES = MAX_TREES * LEAF_PER_TREE;
 // unimpeded and only has to go around the log.
 const trunkCells = new Map<number, number>();
 
+// ---------------------------------------------------------------- occlusion
+// A tree standing between the camera and the player fades out, so the player
+// is never lost behind a trunk. The camera is a fixed orthographic iso offset
+// of (+1,+1,+1), so "between" is a projection onto that one axis rather than a
+// real ray cast: a tree occludes when it is nearer the camera than the player
+// is AND its screen footprint overlaps the player's.
+//
+// FADE_MIN is the floor a fully-occluded tree fades to. Not lower: at this
+// zoom a tree is a dozen pixels across, and dropping much past this turns it
+// into a smear rather than a see-through tree.
+const FADE_MIN = 0.28;
+
+// How wide the player reads on screen, in the same units as `off` below. The
+// player is ~0.6 wide and ~1.8 tall; measured across the iso projection its
+// diagonal footprint is about 1.0, and half of that is the radius from their
+// centre to the edge that a tree has to reach.
+const PLAYER_SCREEN_R = 0.9;
+// Half the canopy's diagonal: a 5-voxel-wide, 3-layer canopy spans 5 voxels,
+// so its silhouette is a ~3.5-unit circle in the same projected units.
+const TREE_SCREEN_R = 2.5;
+
+// Narrow. See the note at the test below: this is an on/off with a short
+// ease, not a ramp across the whole overlap distance.
+const EDGE_FEATHER = 0.35;
+
+// A tree counts as occluding once it is genuinely in front of the player along
+// the view axis. This is a fixed threshold, not a fade: crossing it flips the
+// tree between solid and dithered, which is the intended behaviour.
+const DEPTH_MIN = 0.25;
+
+const VIEW_DIR = new THREE.Vector3(1, 1, 1).normalize();
+
+/** Per-tree fade, 1 = solid. Parallel to the trunk/leaf instance order. */
+let fades: Float32Array = new Float32Array(0);
+let treeCount = 0;
+let trunkMesh: THREE.InstancedMesh | null = null;
+let leafMesh: THREE.InstancedMesh | null = null;
+let fadeAttr: THREE.InstancedBufferAttribute | null = null;
+let leafFadeAttr: THREE.InstancedBufferAttribute | null = null;
+
+const _rel = new THREE.Vector3();
+const _perp = new THREE.Vector3();
+
+/**
+ * Fade any tree standing between the camera and the player.
+ *
+ * `playerPos` is the player's world position; its Y is ignored for the overlap
+ * test because the camera looks down at 45 degrees, so what matters is where
+ * the two sit on the ground plane.
+ */
+export function updateTreeFade(playerPos: THREE.Vector3): void {
+  if (!trunkMesh || !leafMesh || !fadeAttr || !leafFadeAttr || treeCount === 0) return;
+
+  for (let k = 0; k < treeCount; k++) {
+    // the trunk's base, which is where the tree's footprint sits
+    const m = trunkMesh.instanceMatrix.array;
+    const tx = m[k * 16 + 12];
+    const tz = m[k * 16 + 14];
+
+    _rel.set(tx - playerPos.x, 0, tz - playerPos.z);
+    // positive when the tree is nearer the camera than the player
+    const depth = _rel.dot(VIEW_DIR);
+    if (depth < DEPTH_MIN) {
+      fades[k] = 1;
+      continue;
+    }
+
+    // Distance off the view axis. This is a SCREEN-space distance: the camera
+    // is orthographic with a fixed direction, so moving along VIEW_DIR only
+    // changes depth and leaves this untouched. That matters, because fading on
+    // anything depth-dependent made a tree change opacity as the player walked
+    // toward or away from it while staying behind it.
+    _perp.copy(_rel).addScaledVector(VIEW_DIR, -depth);
+    const off = _perp.length();
+
+    // A tree is occluding when the player's own footprint overlaps the tree's
+    // canopy, not merely when they are near it. Both radii are in the same
+    // screen-space units, so the test is a straight sum: the player is
+    // PLAYER_SCREEN_R wide on screen, the canopy is LEAF_W across, and they
+    // have to touch for one to hide the other.
+    //
+    // EDGE_FEATHER is deliberately narrow. A wide feather makes the fade a
+    // gradient over distance - the tree is half-transparent when its edge is
+    // near the player and fully transparent when centred, which reads as the
+    // opacity changing for no reason. A narrow one keeps it effectively on or
+    // off, easing only over the last fraction so it does not pop.
+    const reach = PLAYER_SCREEN_R + TREE_SCREEN_R;
+    let f = 1;
+    if (off < reach + EDGE_FEATHER) {
+      const t = 1 - Math.max(0, Math.min(1, (off - reach + EDGE_FEATHER) / (EDGE_FEATHER * 2)));
+      f = 1 - (1 - FADE_MIN) * t;
+    }
+    fades[k] = f;
+  }
+
+  for (let k = 0; k < treeCount; k++) {
+    fadeAttr.setX(k, fades[k]);
+    // a tree is one trunk plus LEAF_PER_TREE cubes; they all fade together
+    const base = k * LEAF_PER_TREE;
+    for (let s = 0; s < LEAF_PER_TREE; s++) leafFadeAttr.setX(base + s, fades[k]);
+  }
+  fadeAttr.needsUpdate = true;
+  leafFadeAttr.needsUpdate = true;
+}
+
 /**
  * True if a world point is inside a tree trunk, or close enough to one that a
  * body of the given radius would clip it.
@@ -124,8 +229,8 @@ export function createTrees(): THREE.Group {
 
   // plain material, not the terrain's banded/outlined one: a tree is a solid
   // object, so the per-voxel-row banding and the terrace outline would only
-  // fight the silhouette
-  const mat = voxelMaterial();
+  // fight the silhouette. `fade` adds the per-instance occlusion dither.
+  const mat = voxelMaterial({ fade: true });
 
   const trunk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, MAX_TREES);
   const leaves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, MAX_LEAVES);
@@ -136,8 +241,16 @@ export function createTrees(): THREE.Group {
   // each mesh needs its own buffer because the two index independently.
   const trunkTop = new THREE.InstancedBufferAttribute(new Float32Array(MAX_TREES * 3), 3);
   const leavesTop = new THREE.InstancedBufferAttribute(new Float32Array(MAX_LEAVES * 3), 3);
+  // per-instance occlusion value, one per trunk and one per leaf cube:
+  // 1 = solid, lower = dithered away
+  const trunkFade = new THREE.InstancedBufferAttribute(new Float32Array(MAX_TREES).fill(1), 1);
+  const leafFade = new THREE.InstancedBufferAttribute(new Float32Array(MAX_LEAVES).fill(1), 1);
+  trunkFade.setUsage(THREE.DynamicDrawUsage);
+  leafFade.setUsage(THREE.DynamicDrawUsage);
   trunk.geometry.setAttribute('aTop', trunkTop);
   leaves.geometry.setAttribute('aTop', leavesTop);
+  trunk.geometry.setAttribute('aFade', trunkFade);
+  leaves.geometry.setAttribute('aFade', leafFade);
   trunk.frustumCulled = false;
   leaves.frustumCulled = false;
 
@@ -169,7 +282,7 @@ export function createTrees(): THREE.Group {
 
       const groundY = levelAtWorld(x, z) * VOXEL;
 
-      // The trunk's bare section is one voxel taller than the player, then it
+      // The trunk's bare section is two voxels taller than the player, then it
       // carries on up through the first two canopy layers. It stops flush
       // under the crowning cube, so the tip of the log is hidden inside the
       // leaves and the canopy sits on the trunk rather than floating above it.
@@ -239,6 +352,14 @@ export function createTrees(): THREE.Group {
   leaves.instanceColor!.needsUpdate = true;
   trunkTop.needsUpdate = true;
   leavesTop.needsUpdate = true;
+
+  // hand the meshes to the fade pass
+  trunkMesh = trunk;
+  leafMesh = leaves;
+  fadeAttr = trunkFade;
+  leafFadeAttr = leafFade;
+  treeCount = n;
+  fades = new Float32Array(Math.max(1, n)).fill(1);
 
   group.add(trunk, leaves);
   return group;
