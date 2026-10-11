@@ -14,8 +14,12 @@ const FOOT_R = 0.6;
 const FORWARD = new THREE.Vector3(-1, 0, -1).normalize();
 const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 
-const TURN = Math.PI / 2;
-const BASE_FACING = Math.PI / 4; // the four readable iso facings
+// Eight facings, 45 degrees apart, so the diagonals (W+D and friends) get
+// their own facing instead of borrowing the nearest cardinal one. The base
+// offset is unchanged at 45 degrees, which keeps the original four cardinal
+// facings exactly where they were and just slots the four in-between.
+const TURN = Math.PI / 4;
+const BASE_FACING = Math.PI / 4;
 
 // the highest surface under the player's footprint, in whole voxels
 function surfaceLevel(x: number, z: number): number {
