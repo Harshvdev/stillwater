@@ -78,7 +78,7 @@ const vn = (x: number, y: number, s = 0): number => {
 // blocks get finer. See LEVEL_* and MIN_LEVEL.
 export const VOXEL = 1;
 export const SEA_Y = 0;
-export const MIN_LEVEL = -8;
+export const MIN_LEVEL = -6;
 export const REGION_HALF = 86; // land + shelf are voxelised out to here
 export const GRID = (REGION_HALF * 2) / VOXEL; // 172 columns per side
 
@@ -90,18 +90,26 @@ const SAND = 1;
 const WET = 2;
 const ROCK = 3;
 
-const GRASS_H = 1.15;
+// Band edges, matched to what groundHeight actually produces: sand tops out at
+// 1.7, grass runs 1.7 -> 2.6, and the seabed starts falling below 0.35. These
+// used to be 1.15 / 2.2, which were tuned when a voxel was 2 units tall; at
+// VOXEL = 1 they cut through the middle of the sand band and painted part of
+// the beach as grass. Keeping them on the real edges is what makes each band
+// land on exactly one level.
+const SAND_H = 0.35; // above this it is dry beach, below it the wet shelf
+const SHELF_H = -0.5; // a narrow waterline strip before the seabed drops a voxel
+const GRASS_H = 1.7; // sand gives way to grass
 const GRASS_HI = 2.2; // the interior rises one voxel above the grass rim
-const SAND_H = 0.15;
-const SHELF_H = -0.6; // a narrow waterline strip before the seabed drops a voxel
 
-// Level numbers, not heights: the top of a column sits at level * VOXEL. These
-// are the world heights the terrain has always had (6, 4, 2, 0) divided by the
-// new VOXEL, so halving VOXEL doubled each one and the island keeps its shape.
-const LEVEL_GRASS_HI = 6; // grass interior plateau
-const LEVEL_GRASS = 4; // grass rim
-const LEVEL_BEACH = 2; // beach
+// Level numbers, not heights: the top of a column sits at level * VOXEL.
+// Each surface band is exactly one level, so consecutive terraces differ by a
+// single block - which is also all the player can step up (MAX_STEP = VOXEL).
+// The seabed then steps down one level per block from the waterline to
+// MIN_LEVEL via levelOf's floor, so the whole cliff face is uniformly stepped.
 const LEVEL_SHELF = 0; // wet shelf, top flush with the waterline
+const LEVEL_BEACH = 1; // beach
+const LEVEL_GRASS = 2; // grass rim
+const LEVEL_GRASS_HI = 3; // grass interior plateau
 
 function levelOf(h: number): number {
   if (h > GRASS_HI) return LEVEL_GRASS_HI; // grass interior plateau
@@ -111,11 +119,10 @@ function levelOf(h: number): number {
   return Math.max(MIN_LEVEL, Math.floor(h / VOXEL));
 }
 
-// The WET and SAND bands below the waterline are one and two voxels deep at the
-// old 2-unit VOXEL, i.e. world depths of 2 and 4. Deriving them from VOXEL
-// keeps the same physical bands now that a voxel is 1 unit.
-const WET_LEVEL = -VOXEL; // the first level under the waterline
-const WET_SAND_LEVEL = -2 * VOXEL; // and the one below that, still sandy
+// Underwater bands, one level each. The shelf is level 0 (flush with the
+// waterline), so the first submerged level is -1: wet sand, then rock below.
+const WET_LEVEL = LEVEL_SHELF - VOXEL;
+const WET_SAND_LEVEL = WET_LEVEL - VOXEL;
 
 function kindOf(h: number, level: number): number {
   if (h > GRASS_H) return GRASS;

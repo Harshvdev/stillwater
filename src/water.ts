@@ -11,7 +11,7 @@ const HALF = 110; // water grid half-extent, past the island and out to the fog
 const N = (HALF * 2) / VOXEL;
 // must track the island's MIN_LEVEL: the water floor has to sit at the same
 // world depth as the seabed it covers, or the shallows come out wrong.
-const MIN_LEVEL = -8;
+const MIN_LEVEL = -6;
 
 const hs = (i: number, j: number, s = 0): number => {
   const x = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453;
@@ -73,7 +73,9 @@ export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } 
       const r = Math.hypot(x, z) + 0.001;
       cells.push({
         x, z, depth,
-        w: THREE.MathUtils.clamp(1 - depth / 7, 0, 1),
+        // the shelf is now 6 blocks deep at most, not 7 world units of an
+        // 8-unit seabed, so the ramp is scaled to the current floor
+        w: THREE.MathUtils.clamp(1 - depth / 6, 0, 1),
         r,
         nx: x / r,
         nz: z / r,
@@ -146,7 +148,7 @@ export function updateWater(t: number): void {
     const foam = band && on && lace;
 
     // swash: crest brightening right at the waterline
-    const swash = Math.sin(wph) > 0.8 && cell.depth < 2.6;
+    const swash = Math.sin(wph) > 0.8 && cell.depth < 1.8;
 
     if (foam || swash) {
       shadeColor.copy(WHITE);
