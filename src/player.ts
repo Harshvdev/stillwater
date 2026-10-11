@@ -5,10 +5,11 @@ import { PALETTE } from './palette';
 
 const SPEED = 6;
 // a voxel of water is wadeable, two is not - the same "stop at the waterline"
-// rule the original had, restated on the voxel grid
+// rule the original had, restated on the voxel grid. VOXEL is 1 now, so this is
+// "one voxel deep is fine, two is not".
 const STOP_DEPTH = VOXEL + 0.5;
 const MAX_STEP = VOXEL;
-const FOOT_R = 0.6;
+const FOOT_R = 0.3; // was tuned against the old, twice-as-wide voxel
 
 // forward/right directions in world space for the isometric camera
 const FORWARD = new THREE.Vector3(-1, 0, -1).normalize();

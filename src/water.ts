@@ -9,7 +9,9 @@ import { PALETTE } from './palette';
 // so the animation moves on GBA frames instead of sliding smoothly.
 const HALF = 110; // water grid half-extent, past the island and out to the fog
 const N = (HALF * 2) / VOXEL;
-const MIN_LEVEL = -4;
+// must track the island's MIN_LEVEL: the water floor has to sit at the same
+// world depth as the seabed it covers, or the shallows come out wrong.
+const MIN_LEVEL = -8;
 
 const hs = (i: number, j: number, s = 0): number => {
   const x = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453;

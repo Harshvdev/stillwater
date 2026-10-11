@@ -70,11 +70,17 @@ const vn = (x: number, y: number, s = 0): number => {
 // ------------------------------------------------------------- voxel layout
 // One cube is VOXEL x VOXEL world units on the XZ plane and VOXEL tall.
 // Heights snap to integer levels; a column's top surface sits at level * VOXEL.
-export const VOXEL = 2;
+//
+// VOXEL is 1 so a block reads as clearly smaller than the ~1.8 unit tall
+// player. Every level below is a world-space height, so they are all even
+// numbers: halving VOXEL doubles the level count needed to reach the same
+// physical height, which keeps the island's silhouette identical while the
+// blocks get finer. See LEVEL_* and MIN_LEVEL.
+export const VOXEL = 1;
 export const SEA_Y = 0;
-export const MIN_LEVEL = -4;
+export const MIN_LEVEL = -8;
 export const REGION_HALF = 86; // land + shelf are voxelised out to here
-export const GRID = (REGION_HALF * 2) / VOXEL; // 86 columns per side
+export const GRID = (REGION_HALF * 2) / VOXEL; // 172 columns per side
 
 const MIN_Y = MIN_LEVEL * VOXEL;
 
@@ -89,19 +95,33 @@ const GRASS_HI = 2.2; // the interior rises one voxel above the grass rim
 const SAND_H = 0.15;
 const SHELF_H = -0.6; // a narrow waterline strip before the seabed drops a voxel
 
+// Level numbers, not heights: the top of a column sits at level * VOXEL. These
+// are the world heights the terrain has always had (6, 4, 2, 0) divided by the
+// new VOXEL, so halving VOXEL doubled each one and the island keeps its shape.
+const LEVEL_GRASS_HI = 6; // grass interior plateau
+const LEVEL_GRASS = 4; // grass rim
+const LEVEL_BEACH = 2; // beach
+const LEVEL_SHELF = 0; // wet shelf, top flush with the waterline
+
 function levelOf(h: number): number {
-  if (h > GRASS_HI) return 3; // grass interior plateau
-  if (h > GRASS_H) return 2; // grass rim
-  if (h > SAND_H) return 1; // beach
-  if (h > SHELF_H) return 0; // wet shelf, top flush with the waterline
+  if (h > GRASS_HI) return LEVEL_GRASS_HI; // grass interior plateau
+  if (h > GRASS_H) return LEVEL_GRASS; // grass rim
+  if (h > SAND_H) return LEVEL_BEACH; // beach
+  if (h > SHELF_H) return LEVEL_SHELF; // wet shelf, top flush with the waterline
   return Math.max(MIN_LEVEL, Math.floor(h / VOXEL));
 }
+
+// The WET and SAND bands below the waterline are one and two voxels deep at the
+// old 2-unit VOXEL, i.e. world depths of 2 and 4. Deriving them from VOXEL
+// keeps the same physical bands now that a voxel is 1 unit.
+const WET_LEVEL = -VOXEL; // the first level under the waterline
+const WET_SAND_LEVEL = -2 * VOXEL; // and the one below that, still sandy
 
 function kindOf(h: number, level: number): number {
   if (h > GRASS_H) return GRASS;
   if (h > SAND_H) return SAND;
-  if (level >= -1) return WET;
-  if (level === -2) return SAND;
+  if (level >= WET_LEVEL) return WET;
+  if (level === WET_SAND_LEVEL) return SAND;
   return ROCK;
 }
 
@@ -154,7 +174,9 @@ export function levelAtWorld(x: number, z: number): number {
 // two cubes meet. The line is measured in world units from the cube's local
 // position and widened by fwidth, so it never thins below a rendered pixel and
 // shimmers as the camera pans.
-const EDGE_HALF = 0.17; // half thickness of the line, world units
+// half thickness of the line, as a fraction of a voxel so it stays visually
+// the same weight now that a block is half as wide as it was
+const EDGE_HALF = VOXEL * 0.085;
 
 const edgeColor = new THREE.Color().setHex(PALETTE.edgeLine, THREE.SRGBColorSpace);
 const EDGE_COL_GLSL = `vec3(${edgeColor.r.toFixed(4)}, ${edgeColor.g.toFixed(4)}, ${edgeColor.b.toFixed(4)})`;
@@ -195,7 +217,10 @@ ${bands ? `varying float vBandTop;
 varying float vWorldY;
 const float VOXEL_F = ${VOXEL.toFixed(1)};
 const float ROW_SHADE = 0.08;
-const float ROW_CLAMP = 8.0;` : ''}
+// deepest row the banding keeps stepping for. The island now spans 14 voxels
+// (y=6 down to y=-8), so the clamp has to cover the whole column or the lower
+// cliff would flatten out into one shade instead of staying layered.
+const float ROW_CLAMP = ${(LEVEL_GRASS_HI - MIN_LEVEL).toFixed(1)};` : ''}
 ${outline ? `varying vec2 vExpose;
 varying vec3 vLocal;
 const float EDGE_HALF = ${EDGE_HALF.toFixed(4)};
@@ -399,8 +424,12 @@ export function getTerrainMesh(): THREE.InstancedMesh {
 // Flower cubes speckled over the grass in drifts, the way the original's
 // flower hash clustered them, rather than an even sprinkle over every cell.
 export function createFlowers(): THREE.InstancedMesh {
-  const max = 3072;
-  const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+  // 4x the cells means 4x the candidates, so the cap and the bloom offset both
+  // scale with the finer grid. 0.3 cube was 15% of a 2-unit voxel; keep that
+  // ratio against the 1-unit voxel.
+  const max = 12288;
+  const size = VOXEL * 0.15;
+  const geo = new THREE.BoxGeometry(size, size, size);
   const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), max);
   mesh.frustumCulled = false;
   const m = new THREE.Matrix4();
@@ -409,10 +438,18 @@ export function createFlowers(): THREE.InstancedMesh {
 
   for (let j = 0; j < GRID && n < max; j++) {
     for (let i = 0; i < GRID && n < max; i++) {
-      if (levels[j * GRID + i] < 2) continue;
-      // a low-frequency mask decides where flowers are allowed to grow at all
-      if (vn(i * 0.09, j * 0.09, 61) < 0.62) continue;
-      if (hs(i, j, 5) > 0.28) continue;
+      // grass rim and up; LEVEL_BEACH is the old hardcoded 2
+      if (levels[j * GRID + i] < LEVEL_GRASS) continue;
+      // a low-frequency mask decides where flowers are allowed to grow at all.
+      // The noise is sampled per cell, so the frequency is halved to keep each
+      // drift the same physical size now that cells are half as wide.
+      //
+      // There is no second coin-flip gate here. There are 4x as many cells as
+      // before, so keeping the same per-cell probability would thin the flowers
+      // to a quarter of their old density; the drift mask alone already lands
+      // near the original count, and it keeps them clustered the way the
+      // original's flower hash did.
+      if (vn(i * 0.045, j * 0.045, 61) < 0.62) continue;
       const topY = levels[j * GRID + i] * VOXEL;
       const rx = hs(i, j, 41);
       const rz = hs(i, j, 43);
@@ -423,7 +460,7 @@ export function createFlowers(): THREE.InstancedMesh {
         kind > 0.82 ? PALETTE.flowerPink : kind > 0.38 ? PALETTE.flowerYellow : PALETTE.flowerWhite,
         THREE.SRGBColorSpace
       );
-      m.setPosition(x, topY + 0.15, z);
+      m.setPosition(x, topY + size / 2, z);
       mesh.setMatrixAt(n, m);
       mesh.setColorAt(n, c);
       n++;

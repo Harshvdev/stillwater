@@ -10,16 +10,19 @@ import {
 // sand dips in chunky pixel steps instead of sliding smoothly.
 const LIFE = 10.0; // seconds until the sand is flat again
 const HOLD = 0.25; // fraction of LIFE the mark keeps full depth
-const DEPTH = 0.34; // trough depth
-const SIGMA = 0.68; // trough radius
+// DEPTH and SIGMA are world-space lengths tuned against the old 2-unit voxel;
+// halving them keeps the footprint the same number of cells wide now that
+// VOXEL is 1. QUANT derives from VOXEL so "quarter-voxel" keeps meaning that.
+const DEPTH = 0.17; // trough depth
+const SIGMA = 0.34; // trough radius
 const BERM = 0.5; // rim height as a fraction of DEPTH
 const BERM_R = 1.5; // rim radius in sigmas
 const BERM_W = 0.55; // rim width in sigmas
-const SPACING = 0.14; // distance between stamps
+const SPACING = 0.07; // distance between stamps
 const MAX_DEPTH = DEPTH * 1.25;
 const MAX_BERM = DEPTH * BERM;
 const REBUILD_HZ = 30; // healing is slow, so the field is rebuilt at 30 Hz
-const QUANT = 0.25; // sand moves in quarter-voxel increments
+const QUANT = VOXEL / 4; // sand moves in quarter-voxel increments
 
 const REACH = SIGMA * (BERM_R + BERM_W * 2);
 
