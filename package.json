@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  },
+  "name": "voxel-3-space-bunny",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "type": "module"
+}

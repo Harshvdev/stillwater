@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.playwright-mcp/
+references/
+screenshots/
+*.log
+.DS_Store
+.idea/
+.vscode/
