@@ -45,10 +45,13 @@ export function isUnderwater(x: number, z: number): boolean {
   return groundHeight(x, z) < 0;
 }
 
-// the sand band footprints are stamped into
+// The sand band footprints are stamped into. This must agree with the band the
+// builder paints: dry beach between SAND_H and GRASS_H. It used to carry its
+// own stale 0.15 / 1.15 cutoffs from the old 2-unit voxel, so footprints landed
+// on grass that no longer counted as sand.
 export function isSand(x: number, z: number): boolean {
   const h = groundHeight(x, z);
-  return h > 0.15 && h <= 1.15;
+  return h > 0.35 && h <= 1.7;
 }
 
 const hs = (i: number, j: number, s = 0): number => {
@@ -135,9 +138,29 @@ function kindOf(h: number, level: number): number {
 const cellX = (i: number) => (i - GRID / 2 + 0.5) * VOXEL;
 const cellZ = (j: number) => (j - GRID / 2 + 0.5) * VOXEL;
 
+// How far inland dry sand may reach, in cells. A couple of cells is enough for
+// a beach strip; anything more walks up over the grass plain.
+const BEACH_REACH = 2;
+
 // column lookup used by player collision and the sand deform
 const levels = new Int8Array(GRID * GRID);
 let levelsReady = false;
+
+// True while this cell is within BEACH_REACH of anything at or below the
+// waterline, which is what makes a cell "near the shore". Off the grid counts
+// as open water so the island border is treated as coastal too. Reads the
+// finished `levels` array, so it is only valid after the first sweep.
+function nearShore(i: number, j: number): boolean {
+  for (let dj = -BEACH_REACH; dj <= BEACH_REACH; dj++) {
+    for (let di = -BEACH_REACH; di <= BEACH_REACH; di++) {
+      const ni = i + di;
+      const nj = j + dj;
+      if (ni < 0 || nj < 0 || ni >= GRID || nj >= GRID) return true;
+      if (levels[nj * GRID + ni] <= LEVEL_SHELF) return true;
+    }
+  }
+  return false;
+}
 
 function colIndex(x: number, z: number): number {
   const i = Math.floor((x + REGION_HALF) / VOXEL);
@@ -329,7 +352,16 @@ export function createIsland(): THREE.Group {
       const h = groundHeight(x, z);
       const level = levels[k];
 
-      const kind = kindOf(h, level);
+      // Height alone lets sand run far inland: everything between the waterline
+      // and the grass is dry beach, which at this grid width is a huge radial
+      // band eating the grass plain. Sand is only believable near water, so a
+      // cell keeps its sand kind only while it is within BEACH_REACH cells of
+      // something at or below the waterline; further inland it becomes grass,
+      // which is what that ground actually is. Levels are already filled, so
+      // this reads only finished neighbours.
+      let kind = kindOf(h, level);
+      if (kind === SAND && level >= LEVEL_BEACH && !nearShore(i, j)) kind = GRASS;
+
       // two smooth octaves so colour drifts form soft patches; the small hash
       // term only dithers band edges, it must not make every cell differ
       const r = vn(i * 0.13, j * 0.13, 5) * 0.68 + vn(i * 0.38, j * 0.38, 9) * 0.32 +
@@ -343,10 +375,13 @@ export function createIsland(): THREE.Group {
         topHex = pick(PALETTE.grass, r);
         sideHex = pick(PALETTE.dirt, r2);
       } else if (kind === SAND) {
-        topHex = pick(PALETTE.sand, r);
-        sideHex = PALETTE.sand[3];
+        // Sand is the brightest surface here, so bias the ramp light: picking
+        // straight off r put most cells on the dark end and the beach read as
+        // mud. Squeeze r into the upper half of the ramp instead.
+        topHex = pick(PALETTE.sand, 0.35 + r * 0.65);
+        sideHex = PALETTE.sand[2];
       } else if (kind === WET) {
-        topHex = pick(PALETTE.wetSand, r);
+        topHex = pick(PALETTE.wetSand, 0.35 + r * 0.65);
         sideHex = PALETTE.wetSand[2];
       } else {
         topHex = pick(PALETTE.rock, r);
