@@ -283,28 +283,44 @@ function faceColor(hex: number, c: THREE.Color): void {
 // Splitting them means the sand deform only has to move a cap.
 export function createIsland(): THREE.Group {
   const group = new THREE.Group();
-  const geo = new THREE.BoxGeometry(1, 1, 1);
   const mat = voxelMaterial({ bands: true, outline: true });
   const max = GRID * GRID;
+
+  // The cap and the base each index their own instance space: the cap counts
+  // every cell (0..GRID*GRID), the base only the cells that actually have one
+  // (0..nBase). They therefore cannot share an instanced attribute buffer - if
+  // they did, every base write would land on whichever cap owned that index and
+  // overwrite its top colour with the base's side colour. Each gets its own
+  // geometry and its own buffer; only the material (and so the shader) is shared.
+  const capGeo = new THREE.BoxGeometry(1, 1, 1);
+  const baseGeo = new THREE.BoxGeometry(1, 1, 1);
+
   const topAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
   topAttr.setUsage(THREE.DynamicDrawUsage);
+  const baseTopAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
+  baseTopAttr.setUsage(THREE.DynamicDrawUsage);
   // world Y of each instance's top, read by the per-row banding in the shader
   const bandTopAttr = new THREE.InstancedBufferAttribute(new Float32Array(max), 1);
   bandTopAttr.setUsage(THREE.DynamicDrawUsage);
+  const baseBandTopAttr = new THREE.InstancedBufferAttribute(new Float32Array(max), 1);
+  baseBandTopAttr.setUsage(THREE.DynamicDrawUsage);
   // per-instance exposure of the two outlined edges (x, z): 1 where this cap's
   // top layer ends against something lower, 0 where it is flush with a
-  // neighbour. Only the caps read it; the base is a side-face box.
+  // neighbour. Only the caps read it; the base is a side-face box, so its copy
+  // stays all zero and the outline term multiplies out.
   const exposeAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
+  const baseExposeAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
 
-  const capMesh = new THREE.InstancedMesh(geo, mat, max);
-  const baseMesh = new THREE.InstancedMesh(geo, mat, max);
+  const capMesh = new THREE.InstancedMesh(capGeo, mat, max);
+  const baseMesh = new THREE.InstancedMesh(baseGeo, mat, max);
   capMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
   baseMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
-  capMesh.geometry.setAttribute('aTop', topAttr);
-  baseMesh.geometry.setAttribute('aTop', topAttr);
-  capMesh.geometry.setAttribute('aBandTop', bandTopAttr);
-  baseMesh.geometry.setAttribute('aBandTop', bandTopAttr);
-  capMesh.geometry.setAttribute('aExpose', exposeAttr);
+  capGeo.setAttribute('aTop', topAttr);
+  capGeo.setAttribute('aBandTop', bandTopAttr);
+  capGeo.setAttribute('aExpose', exposeAttr);
+  baseGeo.setAttribute('aTop', baseTopAttr);
+  baseGeo.setAttribute('aBandTop', baseBandTopAttr);
+  baseGeo.setAttribute('aExpose', baseExposeAttr);
   capMesh.frustumCulled = false;
   baseMesh.frustumCulled = false;
 
@@ -400,12 +416,14 @@ export function createIsland(): THREE.Group {
         m.setPosition(x, MIN_Y + baseH / 2, z);
         baseMesh.setMatrixAt(nBase, m);
         baseMesh.setColorAt(nBase, side);
-        topAttr.setXYZ(nBase, side.r, side.g, side.b);
+        // the base's own buffer, indexed by nBase - sharing the cap's here is
+        // what painted grass tops brown
+        baseTopAttr.setXYZ(nBase, side.r, side.g, side.b);
         // the same top the cap uses, so rows run continuously down the whole column:
         // the cap is row 0, the voxel of base right under it is row 1, the next
         // is row 2. The cap/base seam is therefore always a visible step and
         // never two coincidentally matching rows.
-        bandTopAttr.setX(nBase, topY);
+        baseBandTopAttr.setX(nBase, topY);
         nBase++;
       }
     }
@@ -420,6 +438,9 @@ export function createIsland(): THREE.Group {
   topAttr.needsUpdate = true;
   bandTopAttr.needsUpdate = true;
   exposeAttr.needsUpdate = true;
+  baseTopAttr.needsUpdate = true;
+  baseBandTopAttr.needsUpdate = true;
+  baseExposeAttr.needsUpdate = true;
 
   levelsReady = true;
   caps = capMesh;
