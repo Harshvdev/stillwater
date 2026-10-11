@@ -64,6 +64,12 @@ export const PALETTE = {
 
 // how much each voxel face is darkened by the baked face light.
 // The camera looks from (+x, +y, +z), so -x and -z are the dark sides.
+//
+// This is the original's baked lighting: every face of every cube is a fixed
+// shade, so a solid block reads as flat colour planes with no gradient across
+// a face and no dependence on where the light happens to be. voxelMaterial's
+// `faceShade` option applies it in the shader, which is what keeps the look
+// independent of the scene lights.
 export const FACE_SHADE = {
   top: 1.0,
   south: 0.88, // +z, faces the camera

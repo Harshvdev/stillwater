@@ -29,6 +29,60 @@ const vn = (x: number, y: number, s = 0): number => {
 const RAMP = PALETTE.water.map((h) => new THREE.Color().setHex(h, THREE.SRGBColorSpace));
 const WHITE = new THREE.Color().setHex(PALETTE.foam, THREE.SRGBColorSpace);
 
+// Sun glint. A pale sea-green rather than the pure foam white: glinting water
+// is not the same as surf, and tinting it keeps the sparkle from reading as a
+// blown-out highlight when the bloom pass picks it up.
+const GLINT = new THREE.Color().setHex(0xd8f2ea, THREE.SRGBColorSpace);
+// How hard a glint pushes past its own colour at the top of its twinkle. This
+// is what gives the bloom pass something to separate, and it is small on
+// purpose: the scene is otherwise entirely LDR, so without a deliberate
+// overdrive the bloom has no highlights at all. At 1.6+ the brightest glints
+// clipped to flat white discs.
+const GLINT_EMIT = 0.5;
+// Fraction of the way toward GLINT at the peak of a twinkle.
+const GLINT_MIX = 0.62;
+
+// The glitter path's axis on the water plane.
+//
+// A specular highlight is not scattered sparkle - it is a band of light
+// running from the viewer out toward the sun's mirror image, because that is
+// the only stretch of water where a wave crest can line up and bounce light
+// straight back. The previous version sprinkled glints uniformly over the sea
+// with a noise threshold, which is why it read as random patches changing
+// colour instead of as a reflection.
+//
+// This is H = normalize(V + S) projected onto y=0, where V is the direction
+// from the water to the camera and S the direction to the sun. With the camera
+// fixed at a (+1,+1,+1) iso offset and the sun at (60,80,40) that works out to
+// roughly (0.75, 0, 0.66). That value is written out here rather than computed,
+// so moving the sun or the camera does NOT move the reflection automatically -
+// re-derive it and update this literal if either moves.
+const GLITTER_AXIS = { x: 0.75, z: 0.661 };
+// Unit vector across the path, so distance from the band is measured
+// perpendicular to it rather than along world axes.
+const GLITTER_ACROSS = { x: -GLITTER_AXIS.z, z: GLITTER_AXIS.x };
+
+// How far from the path's centreline a cell can be and still glint at all.
+// The falloff past this is smooth, so the band has soft edges like a real
+// reflection instead of a hard-edged stripe.
+const GLINT_BAND = 30;
+// How sharply the band concentrates on its centreline. The falloff is raised
+// to a power rather than left linear: linear leaves the outer half of the band
+// nearly as bright as the middle, which flattens the reflection into a broad
+// wash instead of a bright path with dimmer shoulders.
+const GLINT_FALLOFF = 2.2;
+
+// The band is centred here rather than on the world origin.
+//
+// The island sits at the origin, so a band through (0,0) puts its brightest
+// core underneath the land where no water is visible at all, and leaves the
+// open sea - the only place the reflection can actually be seen - out at the
+// band's dim edges. This offset moves the core out into the water off the
+// island's south-east side, which is the stretch of sea the camera looks
+// across. Measured before the move, mean brightness was flat at ~0.14 in every
+// band from 0-8 out to 40-48 units, i.e. no centre peak at all.
+const GLINT_ORIGIN = { x: 34, z: 18 };
+
 interface WaterCell {
   x: number;
   z: number;
@@ -152,6 +206,42 @@ export function updateWater(t: number): void {
 
     if (foam || swash) {
       shadeColor.copy(WHITE);
+    }
+
+    // Sun glint, drawn over the top of whatever the cell already is.
+    //
+    // Position in the band is measured along and across the glitter axis, so
+    // the highlight forms a coherent band running out toward the sun rather
+    // than a uniform sprinkle. Within the band, the crest noise is sampled
+    // anisotropically - stretched ALONG the path - so the lit cells form
+    // elongated streaks parallel to it. Round blobs scattered at random are
+    // what made this read as patches rather than as a reflection.
+    const along = cell.x * GLITTER_AXIS.x + cell.z * GLITTER_AXIS.z;
+    const across = (cell.x - GLINT_ORIGIN.x) * GLITTER_ACROSS.x
+                 + (cell.z - GLINT_ORIGIN.z) * GLITTER_ACROSS.z;
+    const off = Math.abs(across) / GLINT_BAND;
+
+    if (off < 1) {
+      // smoothstep falloff, then a power on top so the band actually peaks on
+      // its centreline instead of staying roughly flat across its whole width
+      const bandT = 1 - off;
+      const bandW = Math.pow(bandT * bandT * (3 - 2 * bandT), GLINT_FALLOFF);
+
+      // crest mask, squashed along the path so lit cells streak out from it
+      const crest = vn(along * 0.09, across * 0.34, 211);
+      if (crest > 0.66) {
+        // how hard this particular crest throws, before the twinkle
+        const crestW = Math.min(1, (crest - 0.66) / 0.34);
+
+        // per-cell phase, so adjacent glints never pulse together
+        const phase = hs(cell.i, cell.j, 223);
+        const tw = Math.abs(((tf * 1.6 + phase) % 1) * 2 - 1);
+
+        const amt = bandW * crestW * tw * GLINT_MIX;
+        shadeColor.lerp(GLINT, amt);
+        // only the brightest cores are driven past 1.0, and only a little
+        shadeColor.multiplyScalar(1 + amt * GLINT_EMIT);
+      }
     }
     mesh.setColorAt(k, shadeColor);
     topAttr.setXYZ(k, shadeColor.r, shadeColor.g, shadeColor.b);

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COAST_RADII, COAST_SAMPLES } from './coast';
-import { PALETTE, pick } from './palette';
+import { PALETTE, FACE_SHADE, pick } from './palette';
 
 // ---------------------------------------------------------------- coast port
 // Verbatim from the 3d original, so the island silhouette is identical.
@@ -194,10 +194,13 @@ const EDGE_HALF = VOXEL * 0.085;
 const edgeColor = new THREE.Color().setHex(PALETTE.edgeLine, THREE.SRGBColorSpace);
 const EDGE_COL_GLSL = `vec3(${edgeColor.r.toFixed(4)}, ${edgeColor.g.toFixed(4)}, ${edgeColor.b.toFixed(4)})`;
 
-export function voxelMaterial(opts: { bands?: boolean; outline?: boolean; fade?: boolean } = {}): THREE.MeshLambertMaterial {
+export function voxelMaterial(opts: {
+  bands?: boolean; outline?: boolean; fade?: boolean; faceShade?: boolean;
+} = {}): THREE.MeshLambertMaterial {
   const bands = opts.bands === true;
   const outline = opts.outline === true;
   const fade = opts.fade === true;
+  const faceShade = opts.faceShade === true;
   // `fade` reads a per-instance aFade (1 = solid, lower = see-through) and
   // punches a screen-door dither of holes rather than blending with alpha.
   //
@@ -212,7 +215,8 @@ export function voxelMaterial(opts: { bands?: boolean; outline?: boolean; fade?:
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   // every variant compiles from one onBeforeCompile source, so the cache key has
   // to name exactly which combination this material is
-  mat.customProgramCacheKey = () => `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}`;
+  mat.customProgramCacheKey = () =>
+    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}:${faceShade ? 'fshade' : 'lit'}`;
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -223,7 +227,8 @@ varying vec3 vTopColor;
 varying float vTopMix;
 ${bands ? 'attribute float aBandTop;\nvarying float vBandTop;\nvarying float vWorldY;' : ''}
 ${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}
-${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}`
+${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}
+${faceShade ? 'varying vec3 vFaceN;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
@@ -232,7 +237,12 @@ vTopColor = aTop;
 vTopMix = step(0.5, normal.y);
 ${bands ? 'vBandTop = aBandTop;\nvWorldY = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;' : ''}
 ${outline ? 'vExpose = aExpose;\nvLocal = position;' : ''}
-${fade ? 'vFade = aFade;' : ''}`
+${fade ? 'vFade = aFade;' : ''}
+${faceShade ? `// The face normal in world space, so the baked shade is chosen by which
+// way the face points in the world rather than in view space. An instance is
+// axis-aligned and only scaled, so the model/instance rotation part of the
+// normal matrix reduces to this.
+vFaceN = normalize(mat3(modelMatrix) * (mat3(instanceMatrix) * objectNormal));` : ''}`
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -265,12 +275,27 @@ float bayer4(vec2 c) {
   v += (((x & 2) >> 1) ^ ((y & 2) >> 1)) * 2;
   v += ((y & 2) >> 1);
   return float(v) / 16.0;
+}` : ''}
+${faceShade ? `varying vec3 vFaceN;
+// Baked per-face light from FACE_SHADE. One flat value per face direction, so
+// every face of a cube is a single even tone - no gradient across a face, and
+// nothing shifts as the camera moves. The dominant axis picks the side: on an
+// axis-aligned box only one component is ever non-zero.
+float faceShadeFactor(vec3 n) {
+  vec3 a = abs(n);
+  if (a.y >= a.x && a.y >= a.z) return n.y > 0.0 ? ${FACE_SHADE.top.toFixed(4)} : ${FACE_SHADE.bottom.toFixed(4)};
+  if (a.x >= a.z) return n.x > 0.0 ? ${FACE_SHADE.east.toFixed(4)} : ${FACE_SHADE.west.toFixed(4)};
+  return n.z > 0.0 ? ${FACE_SHADE.south.toFixed(4)} : ${FACE_SHADE.north.toFixed(4)};
 }` : ''}`
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
 diffuseColor.rgb = mix(diffuseColor.rgb, vTopColor, vTopMix);
+${faceShade ? `// Applied after the top/side mix so the shade tints the final face colour
+// whichever buffer it came from. This replaces the scene lights' own per-face
+// falloff, which is why they are kept near 1.0.
+diffuseColor.rgb *= faceShadeFactor(vFaceN);` : ''}
 ${bands ? `float row = clamp(floor((vBandTop - vWorldY) / VOXEL_F), 0.0, ROW_CLAMP);
 diffuseColor.rgb *= mix(1.0, 1.0 - row * ROW_SHADE, 1.0 - vTopMix);` : ''}
 ${outline ? `// Each of the two far edges is outlined only where this cap is actually
@@ -322,7 +347,7 @@ function faceColor(hex: number, c: THREE.Color): void {
 // Splitting them means the sand deform only has to move a cap.
 export function createIsland(): THREE.Group {
   const group = new THREE.Group();
-  const mat = voxelMaterial({ bands: true, outline: true });
+  const mat = voxelMaterial({ bands: true, outline: true, faceShade: true });
   const max = GRID * GRID;
 
   // The cap and the base each index their own instance space: the cap counts
