@@ -30,7 +30,53 @@ const HORIZON = c(0xbfdcea);
 // Warm haze pooled around the sun. Without it the sun is a hard dot in a cold
 // gradient, which reads as a decal rather than as a light source.
 const SUN_TINT = c(0xffe6b4);
-const SUN_DIR = new THREE.Vector3(60, 80, 40).normalize();
+
+// ------------------------------------------------------------------- the sun
+// The one place the sun's direction is defined. main.ts builds the directional
+// light from this, so the dome's sun disc and the light that actually shades the
+// island cannot drift apart.
+//
+// The old value was (60, 80, 40), i.e. the same (+x, +y, +z) quadrant the camera
+// sits in. That is the worst possible choice for an isometric view, and it is
+// why shadows were invisible: the camera looks along (-1,-1,-1), so a shadow
+// thrown directly away from the sun is thrown directly *away from the camera*,
+// landing behind its own caster and being occluded by it. Every shadow in the
+// scene was correctly rendered and correctly hidden.
+//
+// The fix is to put the sun's horizontal azimuth perpendicular to the view
+// axis. Decomposing the ground plane into the camera's own basis (see the
+// RIGHT / BACK vectors in camera.ts):
+//
+//   screen-right  = ( 1, 0, -1) / sqrt2
+//   screen-away   = ( 1, 0,  1) / sqrt2
+//
+// For the shadow's ground direction to sweep across the frame rather than up
+// it, the sun's horizontal direction wants zero component along `screen-away`
+// and a full one along `screen-right`. That puts the azimuth at 135 degrees,
+// i.e. sun horizontal = (-1, 0, +1) / sqrt2, and shadows fall toward
+// (+1, 0, -1) - dead screen-left, neither toward nor away from the viewer, so
+// nothing ever occludes them.
+//
+// The elevation is a separate knob, and it is the one number that has to serve
+// two masters at once. A high sun barely self-shades (a voxel top face reads
+// flat) but throws a short shadow that stays near its base, which reads as
+// clutter. A low sun throws a long, graphic shadow but flattens the top faces
+// and doubles the size of the tree blobs on screen.
+//
+// 0.66 is sin(41.3 degrees) and is the compromise: top faces keep an N.L of
+// 0.66, and a 5-unit tree throws a shadow 5.7 units long - long enough to read
+// as a shape, short enough that a canopy does not become an amorphous stain
+// twice its own size. The old sun was 53 degrees up, which threw almost
+// nothing at all.
+//
+// Unit length to three decimals: 0.531^2 * 2 + 0.66^2 = 0.9994.
+export const SUN_DIR = new THREE.Vector3(-0.531, 0.66, 0.531).normalize();
+
+// How far along SUN_DIR the light itself is parked from its target. Only the
+// shadow camera's near/far planes and the scene scale care about this number -
+// a directional light's shading does not - but it has to be far enough out that
+// the whole shadow volume sits between the shadow camera's near and far planes.
+export const SUN_DISTANCE = 110;
 
 const vertexShader = /* glsl */ `
 varying vec3 vDir;

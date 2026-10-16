@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VOXEL, SEA_Y, voxelMaterial, levelAtWorld } from './island';
 import { PALETTE } from './palette';
+import { SUN_DIR } from './sky';
 
 // voxel sea: one column per water cell, stretched from the seabed up to the
 // waterline so the depth steps read as terraced blocks. Colours come from a
@@ -66,12 +67,31 @@ const GLINT_MIX = 0.62;
 // colour instead of as a reflection.
 //
 // This is H = normalize(V + S) projected onto y=0, where V is the direction
-// from the water to the camera and S the direction to the sun. With the camera
-// fixed at a (+1,+1,+1) iso offset and the sun at (60,80,40) that works out to
-// roughly (0.75, 0, 0.66). That value is written out here rather than computed,
-// so moving the sun or the camera does NOT move the reflection automatically -
-// re-derive it and update this literal if either moves.
-const GLITTER_AXIS = { x: 0.75, z: 0.661 };
+// from the water to the camera and S the direction to the sun.
+//
+// It used to be a hardcoded literal, (0.75, 0.661), derived by hand for a sun
+// at (60, 80, 40) - with a comment warning that moving the sun would silently
+// leave the reflection in the wrong place. The sun then moved to a cross-axis
+// azimuth so its shadows would fall across the view instead of hiding behind
+// their own casters, which invalidated the literal.
+//
+// So it is computed now, from the shared SUN_DIR and the same fixed isometric
+// view direction camera.ts uses. Move the sun again and the reflection follows
+// it, which is the only version of this that cannot rot.
+//
+// V is the direction from the water up to the camera. The rig is a fixed
+// (+1, +1, +1) offset, and only the direction matters for a reflection, so the
+// ISO_OFFSET magnitude is irrelevant here.
+const GLITTER_AXIS = (() => {
+  const V = new THREE.Vector3(1, 1, 1).normalize();
+  const h = V.clone().add(SUN_DIR);
+  h.y = 0;
+  // Degenerate only if the sun is exactly opposite the camera's azimuth, in
+  // which case there is no specular path on the water at all.
+  if (h.lengthSq() < 1e-6) return { x: 0, z: 1 };
+  h.normalize();
+  return { x: h.x, z: h.z };
+})();
 // Unit vector across the path, so distance from the band is measured
 // perpendicular to it rather than along world axes.
 const GLITTER_ACROSS = { x: -GLITTER_AXIS.z, z: GLITTER_AXIS.x };
@@ -86,16 +106,34 @@ const GLINT_BAND = 30;
 // wash instead of a bright path with dimmer shoulders.
 const GLINT_FALLOFF = 2.2;
 
-// The band is centred here rather than on the world origin.
+// The band is offset out into open water rather than running through the world
+// origin.
 //
-// The island sits at the origin, so a band through (0,0) puts its brightest
-// core underneath the land where no water is visible at all, and leaves the
-// open sea - the only place the reflection can actually be seen - out at the
-// band's dim edges. This offset moves the core out into the water off the
-// island's south-east side, which is the stretch of sea the camera looks
-// across. Measured before the move, mean brightness was flat at ~0.14 in every
+// The island sits at the origin, so a band through (0,0) puts its brightest core
+// underneath the land where no water is visible at all, and leaves the open sea -
+// the only place the reflection can actually be seen - out at the band's dim
+// edges. Offsetting the core gets it onto water the camera actually looks across.
+// Measured before the original move, mean brightness was flat at ~0.14 in every
 // band from 0-8 out to 40-48 units, i.e. no centre peak at all.
-const GLINT_ORIGIN = { x: 34, z: 18 };
+//
+// How far out into open water the band's centreline sits, measured
+// perpendicular to GLITTER_AXIS. Written as a distance along GLITTER_ACROSS
+// rather than as a hand-picked (x, z), because that is the coordinate the
+// shader actually measures in - see `across` in updateWater.
+//
+// Only `GLINT_ORIGIN . GLITTER_ACROSS` reaches the shader; the component along
+// the axis is irrelevant to where the line falls. So the point is built by
+// walking GLINT_BAND_DIST straight out along GLITTER_ACROSS, which keeps the
+// band's distance from the island independent of the axis direction. A
+// hardcoded (x, z) here is what silently breaks whenever the sun moves.
+//
+// 9 units was carried over from the old hand-tuned literal, where it put the
+// core just clear of the island's south-east shore.
+const GLINT_BAND_DIST = 9;
+const GLINT_ORIGIN = {
+  x: GLITTER_ACROSS.x * GLINT_BAND_DIST,
+  z: GLITTER_ACROSS.z * GLINT_BAND_DIST,
+};
 
 interface WaterCell {
   x: number;
