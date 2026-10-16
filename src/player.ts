@@ -34,9 +34,13 @@ function surfaceLevel(x: number, z: number): number {
 }
 
 function part(w: number, h: number, d: number, color: number, x: number, y: number, z: number): THREE.Mesh {
+  // Standard rather than Lambert so the figure sits in the same lighting rig as
+  // the terrain. BoxGeometry already carries per-face normals, so flatShading
+  // is redundant here; roughness 1 keeps skin and cloth from picking up a
+  // specular dot that the matte terrain never has.
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshLambertMaterial({ color, flatShading: true })
+    new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 })
   );
   m.position.set(x, y, z);
   return m;
@@ -79,13 +83,14 @@ export function createPlayer(): THREE.Group {
 
   g.add(legL, legR, armL, armR, body, head, capTop, capBrim, hairBack, eyeL, eyeR);
 
-  const shadow = new THREE.Mesh(
-    new THREE.BoxGeometry(0.9, 0.04, 0.9),
-    new THREE.MeshBasicMaterial({ color: PALETTE.shadow, transparent: true, opacity: 0.5 })
-  );
-  g.add(shadow);
+  // No blob shadow any more. There used to be a flat semi-transparent box pinned
+  // to the ground under the figure, which was the only way to read the player's
+  // footing while the scene had no working shadows. Now that the sun casts real
+  // ones (main.ts sets player.castShadow) that quad would double up: a hard dark
+  // rectangle with a correctly-shaped shadow floating beside it, and the pair
+  // would drift apart every time the body bobbed.
 
-  g.userData = { legL, legR, armL, armR, shadow };
+  g.userData = { legL, legR, armL, armR };
   return g;
 }
 
@@ -96,7 +101,6 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
   const moving = input.x !== 0 || input.y !== 0;
   const ud = player.userData as {
     legL: THREE.Group; legR: THREE.Group; armL: THREE.Group; armR: THREE.Group;
-    shadow: THREE.Mesh;
   };
 
   if (moving) {
@@ -160,8 +164,4 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
   const groundY = surfaceLevel(player.position.x, player.position.z) * VOXEL;
   player.position.y += (groundY - player.position.y) * Math.min(1, dt * 18);
   if (Math.abs(groundY - player.position.y) < 0.02) player.position.y = groundY;
-
-  // the shadow stays on the ground while the body bobs
-  ud.shadow.position.y = groundY + 0.02 - player.position.y;
-  ud.shadow.rotation.y = -player.rotation.y;
 }

@@ -227,9 +227,9 @@ export function treeBlocks(x: number, z: number, radius: number): boolean {
 export function createTrees(): THREE.Group {
   const group = new THREE.Group();
 
-  // plain material, not the terrain's banded/outlined one: a tree is a solid
-  // object, so the per-voxel-row banding and the terrace outline would only
-  // fight the silhouette. `fade` adds the per-instance occlusion dither.
+  // plain material, not the terrain's banded one: a tree is a solid object, so
+  // the per-voxel-row depth falloff would only fight the silhouette. `fade` adds
+  // the per-instance occlusion dither.
   const mat = voxelMaterial({ fade: true });
 
   const trunk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, MAX_TREES);

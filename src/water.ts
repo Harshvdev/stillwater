@@ -34,11 +34,25 @@ const WHITE = new THREE.Color().setHex(PALETTE.foam, THREE.SRGBColorSpace);
 // blown-out highlight when the bloom pass picks it up.
 const GLINT = new THREE.Color().setHex(0xd8f2ea, THREE.SRGBColorSpace);
 // How hard a glint pushes past its own colour at the top of its twinkle. This
-// is what gives the bloom pass something to separate, and it is small on
-// purpose: the scene is otherwise entirely LDR, so without a deliberate
-// overdrive the bloom has no highlights at all. At 1.6+ the brightest glints
-// clipped to flat white discs.
-const GLINT_EMIT = 0.5;
+// is what gives the bloom pass something to separate.
+//
+// It is far higher than it looks like it should be, and it used to be 0.5. That
+// was tuned when the scene had no tone mapping and every other surface sat well
+// under 1.0, so water was the only HDR source in the frame and a small push was
+// enough to clear the threshold. Now that the whole scene is lit properly and
+// tone mapped, water's own albedo is dark - the deep end of the ramp is around
+// 0.05 linear - so the glint has to be driven several times brighter than its
+// own colour before it reaches the bloom's high-pass at all.
+//
+// Driving it that far is safe now for the same reason: the highlight rolls off
+// through the tone curve instead of clipping at 1.0. Under the old pipeline a
+// push this size produced flat white discs.
+// Peak emission lands the glint's brightest channel around 1.3 linear, which is
+// just over the bloom threshold in main.ts. Sitting below it is worse than
+// either extreme: the band still reads as a bright patch on screen, but without
+// the glow that makes it legible as a reflection of the sun rather than as a
+// flat white hole in the sea.
+const GLINT_EMIT = 1.7;
 // Fraction of the way toward GLINT at the peak of a twinkle.
 const GLINT_MIX = 0.62;
 
@@ -102,7 +116,14 @@ let lastFrame = -1;
 export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } {
   const max = N * N;
   const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = voxelMaterial();
+  // Smooth and barely rough. Water is the one surface here that is genuinely
+  // specular, and this is what gives the sea a real sun highlight instead of a
+  // painted-on one: the directional light's reflection lobe lands as a band
+  // across the whole plane of water, which is the same place the hand-placed
+  // glint band in updateWater already draws. The two reinforce each other
+  // rather than replacing one another - one is the physical highlight, the
+  // other is the per-cell foam and twinkle on top of it.
+  const mat = voxelMaterial({ rough: 0.14 });
   const topAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
   topAttr.setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('aTop', topAttr);
@@ -150,10 +171,20 @@ export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } 
   mesh.instanceColor!.needsUpdate = true;
   topAttr.needsUpdate = true;
 
-  // flat deep ocean past the voxel grid so the horizon never shows a void
+  // flat deep ocean past the voxel grid so the horizon never shows a void.
+  //
+  // Lit, not Basic. This quad is most of the visible sea, and as a
+  // MeshBasicMaterial it was one dead flat colour - a big untextured hole in an
+  // otherwise shaded scene. Giving it a Standard material with water's
+  // roughness lets the sun lay a specular band across the open sea and lets
+  // the sky fill grade it, so it recedes into the fog the way the shallows do.
   const ocean = new THREE.Mesh(
     new THREE.PlaneGeometry(700, 700),
-    new THREE.MeshBasicMaterial({ color: PALETTE.water[0] })
+    new THREE.MeshStandardMaterial({
+      color: PALETTE.water[0],
+      roughness: 0.2,
+      metalness: 0,
+    })
   );
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = SEA_Y - 0.05;

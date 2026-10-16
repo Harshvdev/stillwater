@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COAST_RADII, COAST_SAMPLES } from './coast';
-import { PALETTE, FACE_SHADE, pick } from './palette';
+import { PALETTE, pick } from './palette';
 
 // ---------------------------------------------------------------- coast port
 // Verbatim from the 3d original, so the island silhouette is identical.
@@ -145,6 +145,19 @@ const cellZ = (j: number) => (j - GRID / 2 + 0.5) * VOXEL;
 const levels = new Int8Array(GRID * GRID);
 let levelsReady = false;
 
+// How dark a fully walled-in top face goes, as a fraction of its lit value.
+// A corner-AO sum of 3 per corner (every neighbour up) is the maximum, so the
+// darkest possible top face keeps 1 - 3*AO_STRENGTH of its brightness. Kept low
+// deliberately: a top face is already darkened on its sides by the per-row
+// `bands` term, and too much here reads as dirty blotches rather than as depth.
+const AO_STRENGTH = 0.07;
+
+/** 1 if the column at (ni, nj) stands taller than `level`, else 0. Off-grid counts as open air. */
+function taller(ni: number, nj: number, level: number): number {
+  if (ni < 0 || nj < 0 || ni >= GRID || nj >= GRID) return 0;
+  return levels[nj * GRID + ni] > level ? 1 : 0;
+}
+
 function colIndex(x: number, z: number): number {
   const i = Math.floor((x + REGION_HALF) / VOXEL);
   const j = Math.floor((z + REGION_HALF) / VOXEL);
@@ -162,20 +175,30 @@ export function levelAtWorld(x: number, z: number): number {
 // ----------------------------------------------------------------- material
 // Instanced cubes share one geometry, so a per-face split (green top, earth
 // sides) has to come from the shader: aTop carries the top colour and the
-// instance colour stays the side colour. Face light itself comes from the
-// scene's lights, which is constant per cube face and so stays perfectly flat.
+// instance colour stays the side colour. This is the Minecraft grass-block
+// rule - a block whose top and sides are different materials - and it is a
+// per-face *albedo* split only. Shading is left entirely to the scene lights.
+//
+// This used to bake a flat per-face shade (FACE_SHADE) and draw a dark line
+// along the two far edges of every top face. The baked table is gone: real
+// lights plus shadows now produce the face-to-face variation it used to fake.
+// The outline later came back as an opt-in `outline` term - not as a shading
+// substitute but as a pixel-art legibility cue, which is a different job. What
+// survives by default is `bands`, which is an occlusion term - see below.
 //
 // A column is a cap cube over one stretched base box, so a cliff is a single
-// tall quad. Painted flat, the cap and the base beneath it come out the same
-// colour and the whole stack reads as one slab with no edge in it anywhere.
-// With `bands`, aBandTop gives the world Y that row 0 of each instance sits at,
-// and the shader darkens one hard step per VOXEL row below it, so every layer of
-// every face is separately legible. The step is floor'd, not smooth: one flat
-// value per voxel row, which is what keeps the GBA look. Top faces are left
-// alone - vTopMix is 1 there - so only the sides get banded.
+// tall quad whose normal is the same on every row. Lit by a directional light
+// that means one even N.L over the whole face, i.e. a dead flat slab, because
+// real per-voxel lighting never reaches down into a shaft. `bands` restores
+// exactly that missing term: aBandTop gives the world Y that row 0 of each
+// instance sits at, and the shader darkens one hard step per VOXEL row below
+// it, so light falls off with depth into the cliff the way Minecraft's own
+// light propagation dims a deep wall. The step is floor'd, not smooth: one
+// flat value per voxel row. Top faces are left alone - vTopMix is 1 there - so
+// only the sides darken.
 //
-// The cap passes its own top, so its single row is 0. The base passes one voxel
-// lower, which puts its topmost row at 1 and guarantees the cap/base seam is a
+// The cap passes its own top, so its single row is 0. The base passes the same
+// top, which puts its topmost row at 1 and guarantees the cap/base seam is a
 // visible step rather than two matching rows.
 //
 // `outline` draws a thin dark line along the two upper edges of every top face.
@@ -195,12 +218,11 @@ const edgeColor = new THREE.Color().setHex(PALETTE.edgeLine, THREE.SRGBColorSpac
 const EDGE_COL_GLSL = `vec3(${edgeColor.r.toFixed(4)}, ${edgeColor.g.toFixed(4)}, ${edgeColor.b.toFixed(4)})`;
 
 export function voxelMaterial(opts: {
-  bands?: boolean; outline?: boolean; fade?: boolean; faceShade?: boolean;
-} = {}): THREE.MeshLambertMaterial {
+  bands?: boolean; outline?: boolean; fade?: boolean; rough?: number; metal?: number;
+} = {}): THREE.MeshStandardMaterial {
   const bands = opts.bands === true;
   const outline = opts.outline === true;
   const fade = opts.fade === true;
-  const faceShade = opts.faceShade === true;
   // `fade` reads a per-instance aFade (1 = solid, lower = see-through) and
   // punches a screen-door dither of holes rather than blending with alpha.
   //
@@ -212,11 +234,19 @@ export function voxelMaterial(opts: {
   // opaque and discarding a fraction of fragments leaves depth writes, sorting
   // and the player's own draw order completely untouched. It also suits the
   // GBA look, where transparency was done with a stipple anyway.
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  //
+  // Matte by default: this is grass, dirt, sand and rock, none of which
+  // specularly reflect. A little roughness rather than exactly 1.0 keeps the
+  // sun from reading as a flat wash on the lit faces.
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: opts.rough ?? 0.88,
+    metalness: opts.metal ?? 0,
+  });
   // every variant compiles from one onBeforeCompile source, so the cache key has
   // to name exactly which combination this material is
   mat.customProgramCacheKey = () =>
-    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}:${faceShade ? 'fshade' : 'lit'}`;
+    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}`;
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -227,8 +257,7 @@ varying vec3 vTopColor;
 varying float vTopMix;
 ${bands ? 'attribute float aBandTop;\nvarying float vBandTop;\nvarying float vWorldY;' : ''}
 ${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}
-${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}
-${faceShade ? 'varying vec3 vFaceN;' : ''}`
+${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
@@ -237,12 +266,7 @@ vTopColor = aTop;
 vTopMix = step(0.5, normal.y);
 ${bands ? 'vBandTop = aBandTop;\nvWorldY = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;' : ''}
 ${outline ? 'vExpose = aExpose;\nvLocal = position;' : ''}
-${fade ? 'vFade = aFade;' : ''}
-${faceShade ? `// The face normal in world space, so the baked shade is chosen by which
-// way the face points in the world rather than in view space. An instance is
-// axis-aligned and only scaled, so the model/instance rotation part of the
-// normal matrix reduces to this.
-vFaceN = normalize(mat3(modelMatrix) * (mat3(instanceMatrix) * objectNormal));` : ''}`
+${fade ? 'vFade = aFade;' : ''}`
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -253,7 +277,7 @@ varying float vTopMix;
 ${bands ? `varying float vBandTop;
 varying float vWorldY;
 const float VOXEL_F = ${VOXEL.toFixed(1)};
-const float ROW_SHADE = 0.08;
+const float ROW_SHADE = 0.07;
 // deepest row the banding keeps stepping for. The island now spans 14 voxels
 // (y=6 down to y=-8), so the clamp has to cover the whole column or the lower
 // cliff would flatten out into one shade instead of staying layered.
@@ -275,28 +299,20 @@ float bayer4(vec2 c) {
   v += (((x & 2) >> 1) ^ ((y & 2) >> 1)) * 2;
   v += ((y & 2) >> 1);
   return float(v) / 16.0;
-}` : ''}
-${faceShade ? `varying vec3 vFaceN;
-// Baked per-face light from FACE_SHADE. One flat value per face direction, so
-// every face of a cube is a single even tone - no gradient across a face, and
-// nothing shifts as the camera moves. The dominant axis picks the side: on an
-// axis-aligned box only one component is ever non-zero.
-float faceShadeFactor(vec3 n) {
-  vec3 a = abs(n);
-  if (a.y >= a.x && a.y >= a.z) return n.y > 0.0 ? ${FACE_SHADE.top.toFixed(4)} : ${FACE_SHADE.bottom.toFixed(4)};
-  if (a.x >= a.z) return n.x > 0.0 ? ${FACE_SHADE.east.toFixed(4)} : ${FACE_SHADE.west.toFixed(4)};
-  return n.z > 0.0 ? ${FACE_SHADE.south.toFixed(4)} : ${FACE_SHADE.north.toFixed(4)};
 }` : ''}`
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+// The grass-block split: top face takes aTop, everything else keeps the
+// instance colour. Albedo only - the lights do all the shading from here.
 diffuseColor.rgb = mix(diffuseColor.rgb, vTopColor, vTopMix);
-${faceShade ? `// Applied after the top/side mix so the shade tints the final face colour
-// whichever buffer it came from. This replaces the scene lights' own per-face
-// falloff, which is why they are kept near 1.0.
-diffuseColor.rgb *= faceShadeFactor(vFaceN);` : ''}
-${bands ? `float row = clamp(floor((vBandTop - vWorldY) / VOXEL_F), 0.0, ROW_CLAMP);
+${bands ? `// Sky occlusion down a shaft. This is a light-attenuation term, not a
+// face shade: the cliff's normal is constant over every row of the stretched
+// base box, so without this a lit cliff is one dead-even slab. One flat step
+// per voxel row, matching how Minecraft's own light propagation dims a wall
+// the further it sits below the surface.
+float row = clamp(floor((vBandTop - vWorldY) / VOXEL_F), 0.0, ROW_CLAMP);
 diffuseColor.rgb *= mix(1.0, 1.0 - row * ROW_SHADE, 1.0 - vTopMix);` : ''}
 ${outline ? `// Each of the two far edges is outlined only where this cap is actually
 // exposed - where the top layer ends against a lower neighbour. On a flat
@@ -347,7 +363,7 @@ function faceColor(hex: number, c: THREE.Color): void {
 // Splitting them means the sand deform only has to move a cap.
 export function createIsland(): THREE.Group {
   const group = new THREE.Group();
-  const mat = voxelMaterial({ bands: true, outline: true, faceShade: true });
+  const mat = voxelMaterial({ bands: true, outline: true });
   const max = GRID * GRID;
 
   // The cap and the base each index their own instance space: the cap counts
@@ -438,15 +454,28 @@ export function createIsland(): THREE.Group {
         sideHex = PALETTE.rock[3];
       }
 
-      // a cap hemmed in by taller neighbours loses a little light
-      let ao = 0;
-      for (let d = 0; d < 4; d++) {
-        const ni = i + (d === 0 ? 1 : d === 1 ? -1 : 0);
-        const nj = j + (d === 2 ? 1 : d === 3 ? -1 : 0);
-        if (ni < 0 || nj < 0 || ni >= GRID || nj >= GRID) continue;
-        if (levels[nj * GRID + ni] > level) ao += 1;
+      // Corner ambient occlusion on the top face, Minecraft's own rule.
+      //
+      // For each of the four diagonals around this column, take the two edge
+      // neighbours it sits between and the corner cell itself. If both edges
+      // are taller the corner is fully walled in and gets nothing; otherwise
+      // it loses one step per occluding neighbour. Averaging the four corners
+      // gives one value for the face.
+      //
+      // This replaces a flat count of the four side neighbours, which could not
+      // tell a square pit (all four sides up, dark) from an open terrace with
+      // one raised edge (equally "one occluder", but hardly any real occlusion
+      // at all). The saturating rule is what makes a corner read as a corner.
+      let aoSum = 0;
+      for (let dj = -1; dj <= 1; dj += 2) {
+        for (let di = -1; di <= 1; di += 2) {
+          const s1 = taller(i + di, j, level);
+          const s2 = taller(i, j + dj, level);
+          const cr = taller(i + di, j + dj, level);
+          aoSum += s1 && s2 ? 0 : 3 - (s1 + s2 + cr);
+        }
       }
-      const aoK = 1 - ao * 0.07;
+      const aoK = 1 - (aoSum / 4) * AO_STRENGTH;
 
       const topY = level * VOXEL;
 
@@ -527,7 +556,10 @@ export function createFlowers(): THREE.InstancedMesh {
   const max = 12288;
   const size = VOXEL * 0.15;
   const geo = new THREE.BoxGeometry(size, size, size);
-  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), max);
+  // fully matte: a petal has no specular lobe, and at this size any highlight
+  // would just read as noise
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
+  const mesh = new THREE.InstancedMesh(geo, mat, max);
   mesh.frustumCulled = false;
   const m = new THREE.Matrix4();
   const c = new THREE.Color();

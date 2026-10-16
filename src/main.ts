@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createIsland, createFlowers, levelAtWorld, VOXEL, SEA_Y } from './island';
 import { createWater, updateWater } from './water';
 import { createTrees, updateTreeFade } from './trees';
@@ -9,7 +10,7 @@ import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
 import { createCamera, updateCamera, resizeCamera, setRenderSize } from './camera';
-import { PALETTE } from './palette';
+import { createSky, horizonColor } from './sky';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -19,15 +20,32 @@ const SCALE = PIXEL ? Math.max(1, Math.min(8, parseFloat(PIXEL) || 3)) : 3;
 
 function main(): void {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(PALETTE.sky);
-  scene.fog = new THREE.Fog(PALETTE.fog, 150, 330);
+  // No scene.background: the sky is a real dome now (sky.ts), so that the
+  // gradient, the sun and the fog can all be made to agree with each other.
+  // The fog is keyed to the dome's own horizon colour rather than to a
+  // separately chosen palette entry, which is what used to leave a visible
+  // seam where the far ocean met the background.
+  scene.fog = new THREE.Fog(horizonColor().getHex(), 120, 300);
 
   const camera = createCamera();
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setPixelRatio(1);
-  // Shadow maps. PCF rather than the default Basic, so a shadow edge is a
-  // couple of pixels of softening instead of a hard stair-step; at this render
-  // resolution a Basic edge aliases badly as the camera pans.
+  // Tone mapping happens once, at the very end, in OutputPass. three forces
+  // NoToneMapping on any material that renders into a render target, so
+  // setting this here does not double-apply it to the scene pass - it only
+  // tells OutputPass which curve to run.
+  //
+  // Neutral (Khronos PBR Neutral) rather than ACES: ACES deliberately trades
+  // saturation for highlight rolloff, which visibly drags the greens and
+  // cyans in this palette toward grey. Neutral rolls off just as hard but
+  // holds hue, which is what a limited hand-picked ramp needs.
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  // Shadow maps. PCF, which is the filtered one. Note that
+  // THREE.PCFSoftShadowMap still exists as an export in r186 but the renderer
+  // no longer implements it: WebGLShadowMap silently rewrites it to
+  // PCFShadowMap and logs "PCFSoftShadowMap has been removed". Asking for soft
+  // here would therefore be a no-op that looks like it worked.
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -46,12 +64,6 @@ function main(): void {
   // values above 1.0 into the bloom's high-pass. Without HDR there is nothing
   // for a threshold to separate, and the glow either covers everything or
   // nothing at all.
-  //
-  // Tone mapping stays OFF and there is no OutputPass, deliberately. The
-  // composer would otherwise apply a filmic curve that no colour in the
-  // palette was authored against, which shifts every hue and crushes the flat
-  // GBA ramps. The pass chain here is render -> bloom -> straight to screen,
-  // so the only thing that changed on screen is the added glow.
   const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
     type: THREE.HalfFloatType,
     // the bloom blurs, so the target must not be nearest-filtered
@@ -61,16 +73,22 @@ function main(): void {
   const composer = new EffectComposer(renderer, composerTarget);
   composer.addPass(new RenderPass(scene, camera));
 
-  // Threshold sits above every static surface in the palette - sunlit sand
-  // peaks near 0.70 linear - so the glow is confined to the water's sun glints,
-  // which are driven past 1.0 in water.ts. Nothing else in the scene should
-  // reach it.
-  //
-  // Strength and radius are both modest. At a third of screen resolution a
-  // wide kernel spreads a single glint across a large part of the frame and
-  // the whole image goes hazy, which reads as washed out rather than glowing.
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.45, 0.25, 0.85);
+  // Runs in linear HDR, before OutputPass tone maps. The threshold is above 1.0
+  // on purpose: sunlit sand lands around 1.18 linear (see the light budget
+  // above), so anything at or below 1.0 would be ordinary ground and would
+  // glow. Above that threshold only three things qualify - the sun disc, the
+  // water's sun glints and white foam - because those are the only surfaces
+  // authored past white.
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.3, 1.22);
   composer.addPass(bloom);
+
+  // Last in the chain, and the reason the pass order above is safe. Everything
+  // upstream works in linear HDR; OutputPass applies the tone curve and the
+  // sRGB encode in one go, at the only point where both are wanted. Leaving it
+  // off (as this did before) is why the scene previously looked flat: bright
+  // pixels clipped at 1.0 with no rolloff, and no highlight could ever bloom
+  // through to white.
+  composer.addPass(new OutputPass());
 
   const resizeComposer = (): void => {
     const w = Math.max(1, Math.floor(window.innerWidth / SCALE));
@@ -80,20 +98,35 @@ function main(): void {
   };
   resizeComposer();
 
-  // Lighting budget. FACE_SHADE multiplies whatever the lights produce, and
-  // its six values average about 0.8, so leaving the lights at their old level
-  // and adding the baked term on top costs roughly a fifth of the whole image.
-  // These intensities are therefore deliberately HIGHER than they were before
-  // face shading: the baked term is the thing that darkens faces now, so the
-  // lights have to overshoot to land on the same overall brightness.
+  // ---------------------------------------------------------------- lights
+  // Budget, now that the baked FACE_SHADE table is gone.
   //
-  // The hemisphere carries most of the level and lights every face regardless
-  // of which way it points, so nothing facing away from the sun goes black. The
-  // directional light adds the sun-facing lift and carries the shadow - it is
-  // the only term a shadow can remove, which is what keeps a shadowed top face
-  // at roughly 70% of a lit one instead of dropping to nothing.
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8fa4c4, 1.55));
-  const sun = new THREE.DirectionalLight(0xfff4e0, 1.05);
+  // Previously the hemisphere ran at 1.55 and the sun at 1.05, because a baked
+  // per-face multiply was also being applied and the two had to be kept low
+  // enough that their sum did not blow the palette out. That baked term is gone,
+  // so these are now chosen on their own terms - and the split has moved a long
+  // way the other way.
+  //
+  // The directional light does almost all the work. It is the only light that
+  // casts, so it is also the only one a shadow can remove: anything the
+  // hemisphere contributes is shadow-proof, and every unit of ambient spent
+  // here is a unit of contrast a cast shadow cannot recover. At the old 1.55
+  // the ambient was brighter than the sun and shadows were all but invisible.
+  //
+  // The hemisphere is now a sky fill, not a second key. It still lights every
+  // face regardless of which way it points, so nothing facing away from the sun
+  // goes black, and its ground colour is the warm sand bounce that keeps
+  // undersides from reading as cold holes.
+  //
+  // The two numbers are chosen together, against one target: the brightest lit
+  // surface in the palette - sunlit sand, albedo ~0.93 linear, top face at
+  // N.L = 0.74 - should land at about 1.0 in linear space. Landing there is
+  // what keeps the bloom threshold meaningful, because a value above 1.0 is
+  // then reserved for actual highlights instead of for ordinary sunlit ground.
+  //
+  // Overexpose and the whole beach climbs past the threshold and glows.
+  scene.add(new THREE.HemisphereLight(0xdcefff, 0xb08a5e, 0.42));
+  const sun = new THREE.DirectionalLight(0xfff2dc, 1.35);
   sun.position.set(60, 80, 40);
   sun.castShadow = true;
 
@@ -101,21 +134,33 @@ function main(): void {
   // the shadow camera is orthographic, so anything wider would spread the
   // limited shadow resolution over empty sea and make every shadow edge
   // crawl. The camera follows the player, so the bounds follow too.
-  const SHADOW_HALF = 34;
+  const SHADOW_HALF = 46;
   sun.shadow.camera.left = -SHADOW_HALF;
   sun.shadow.camera.right = SHADOW_HALF;
   sun.shadow.camera.top = SHADOW_HALF;
   sun.shadow.camera.bottom = -SHADOW_HALF;
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 260;
-  sun.shadow.mapSize.set(1024, 1024);
-  // A voxel face lit at a grazing angle self-shadows badly without a bias;
+  sun.shadow.camera.far = 320;
+  // 2048 over a 92-unit box is ~22 texels per voxel. That is the difference
+  // between a tree's shadow reading as the tree's shape and reading as a
+  // featureless smudge. It is affordable because the shadow pass is depth-only
+  // and the whole scene is 4 instanced draw calls.
+  sun.shadow.mapSize.set(2048, 2048);
+  // A voxel face lit at a grazing angle self-shadows badly without a bias.
   // normalBias handles the scale and keeps contact shadows attached to the
   // block that casts them, where a flat depth bias would detach them.
-  sun.shadow.bias = -0.0006;
-  sun.shadow.normalBias = 0.5;
+  //
+  // This was 0.5, which was enormous next to a 1-unit voxel: it pushed every
+  // shadow lookup half a block up the surface normal, which is enough to slide
+  // a canopy's shadow clear off the ground it should be sitting on. A tenth of
+  // a block is enough to kill the acne and small enough that the shadow still
+  // touches its caster.
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.05;
   scene.add(sun);
   scene.add(sun.target);
+
+  scene.add(createSky());
 
   const island = createIsland();
   const trees = createTrees();
@@ -147,6 +192,18 @@ function main(): void {
   const player = createPlayer();
   // drop the player onto the island rather than at a fixed height
   player.position.set(0, levelAtWorld(0, 0) * VOXEL, 0);
+  // The player casts now. There used to be a hand-placed translucent quad for
+  // this because nothing else in the scene cast; with the sun's shadow map
+  // doing real work, a real shadow is both cheaper to maintain and correctly
+  // shaped - it stretches and rotates with the sun instead of sitting flat and
+  // square under the figure whichever way the light comes from.
+  player.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      m.castShadow = true;
+      m.receiveShadow = true;
+    }
+  });
   scene.add(player);
 
   const sand = createSandDeform();

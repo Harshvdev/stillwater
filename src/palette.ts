@@ -59,25 +59,15 @@ export const PALETTE = {
   hair: [0x4a3324, 0x35241a],
   cap: [0xe8564a, 0xf2f0e6],
   eye: 0x2a1e14,
-  shadow: 0x123a52,
 } as const;
 
-// how much each voxel face is darkened by the baked face light.
-// The camera looks from (+x, +y, +z), so -x and -z are the dark sides.
-//
-// This is the original's baked lighting: every face of every cube is a fixed
-// shade, so a solid block reads as flat colour planes with no gradient across
-// a face and no dependence on where the light happens to be. voxelMaterial's
-// `faceShade` option applies it in the shader, which is what keeps the look
-// independent of the scene lights.
-export const FACE_SHADE = {
-  top: 1.0,
-  south: 0.88, // +z, faces the camera
-  north: 0.66, // -z
-  east: 0.8, // +x, faces the camera
-  west: 0.58, // -x
-  bottom: 0.42,
-} as const;
+// The baked face-shade table is gone. It used to multiply every face in the
+// shader, giving the scene its whole sense of form at zero light cost - but a
+// flat per-direction multiply is exactly what a real light rig does better, and
+// having both meant the lights had to be dialled back to near-nothing to stop
+// the two adding up (see the lighting notes in main.ts). Face shading is now the
+// directional light's N.L plus the sky fill, so top / +x / +z read bright and
+// -x / -z / bottom read dark purely from which way they point.
 
 const scratch = new THREE.Color();
 
