@@ -29,7 +29,31 @@ export const PALETTE = {
   // Minecraft's yellow-green drops to 1.05:1 and the canopy disappears into
   // the meadow at the default zoom. Hue is nudged off the grass ramp's too,
   // so the two separate on more than just brightness.
-  leaf: [0x5c9e42, 0x4e8c39, 0x41762f],
+  //
+  // THE SPREAD IS THE WHOLE CONSTRAINT, and it is a spread *rule*, not just a
+  // colour list. Every cube in a canopy is picked from this ramp independently,
+  // so the ramp's internal contrast is the contrast between two cubes that
+  // share an edge. This one used to run 1.90:1 (0x5c9e42 / 0x4e8c39 / 0x41762f)
+  // - far wider than any other ramp here - and at dawn the canopies dissolved:
+  // a 1.9x step between neighbouring cubes reads as a hole in the canopy rather
+  // than as texture, because a canopy is the one surface in this scene that is
+  // a thin shell you can see *through*. Bark at 2.16:1 and sand at 1.62:1 are
+  // both fine at the same spreads, because a trunk is a solid column and the
+  // beach is a continuous field - neither has anything behind it showing
+  // through a dark cube.
+  //
+  // It only showed up once the day/night cycle landed, and only at the dark end
+  // of it. At noon the key light pushes the brightest leaves up against the
+  // tone curve, which rolls their highlights off and closes the gap. Before
+  // sunrise the sun contributes almost nothing to a horizontal leaf face, so
+  // the hemisphere fill is the whole story and the raw albedo ratio survives
+  // intact - the exact case the rest of the palette is already tuned for.
+  //
+  // So the fix is to bring this ramp in line with the grass ramp (1.34:1),
+  // which has four entries and reads solid at every hour. The lightest entry
+  // is unchanged, so the canopy's brightness against the meadow is untouched;
+  // only the dark end is lifted.
+  leaf: [0x5c9e42, 0x518f3c, 0x4c8738],
 
   // sand cap tops
   sand: [0xf7e8bd, 0xf2ddab, 0xe6c98f, 0xd8b878],
