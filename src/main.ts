@@ -3,9 +3,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createIsland, createFlowers, levelAtWorld, VOXEL, SEA_Y } from './island';
+import { createIsland, createFlowers, createTallGrass, levelAtWorld, VOXEL, SEA_Y } from './island';
 import { createWater, updateWater } from './water';
-import { createTrees, updateTreeFade } from './trees';
+import { createTrees, updateTreeFade, treeLocations } from './trees';
 import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
@@ -19,6 +19,8 @@ import {
 // lines naming it (this import, `initDaySlider()` and `syncDaySlider()`) to
 // remove it; nothing else reads from it.
 import { initDaySlider, syncDaySlider } from './daySlider';
+import { updateWind } from './wind';
+import { createFallingLeaves, updateFallingLeaves } from './fallingLeaves';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -270,13 +272,18 @@ function main(): void {
   const island = createIsland();
   const trees = createTrees();
   const flowers = createFlowers();
+  const tallGrass = createTallGrass(treeLocations);
   scene.add(island);
   scene.add(trees);
   scene.add(flowers);
+  scene.add(tallGrass);
 
   const { mesh: water, ocean } = createWater();
   scene.add(water);
   scene.add(ocean);
+
+  const fallingLeaves = createFallingLeaves();
+  scene.add(fallingLeaves);
 
   // Everything solid casts onto everything solid. The ocean plane is excluded:
   // it is a single huge quad at sea level, so letting it receive would put a
@@ -303,6 +310,21 @@ function main(): void {
     if ((o as THREE.Mesh).isMesh) {
       o.castShadow = true;
       o.receiveShadow = true;
+    }
+  });
+  // Tall grass casts and receives. Casting was deliberately off for a while - at
+  // the default sun a blade's shadow is a few pixels, and at dawn it is a
+  // thirteen-unit hair, which is noise - but the cards are alpha-cutout planes
+  // rather than solid boxes now, so what they throw is a blade-shaped shadow and
+  // not a rectangle. That was checked rather than assumed: three copies a
+  // material's map and alphaTest onto its shadow depth material, so the mask is
+  // respected in the shadow pass. Without that, every card would be stamping a
+  // solid dark rectangle onto the meadow.
+  tallGrass.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
     }
   });
   water.receiveShadow = true;
@@ -383,6 +405,8 @@ function main(): void {
     const t = clock.elapsedTime;
     advanceDayNight(dt);
     updateLights();
+    updateWind(dt, t);
+    updateFallingLeaves(dt, t);
     // TEMPORARY: keeps the panel reading the live hour. See the import above.
     syncDaySlider();
     updatePlayer(player, dt);
@@ -422,6 +446,8 @@ function main(): void {
     __step: (dt = 1 / 60, t = 0): void => {
       advanceDayNight(dt);
       updateLights();
+      updateWind(dt, t);
+      updateFallingLeaves(dt, t);
       updatePlayer(player, dt);
       sand.update(dt, player.position);
       updateWater(t);

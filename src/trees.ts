@@ -86,6 +86,15 @@ const MAX_LEAVES = MAX_TREES * LEAF_PER_TREE;
 // unimpeded and only has to go around the log.
 const trunkCells = new Map<number, number>();
 
+export interface TreeLocation {
+  x: number;
+  z: number;
+  groundY: number;
+  canopyY: number;
+}
+
+export const treeLocations: TreeLocation[] = [];
+
 // ---------------------------------------------------------------- occlusion
 // A tree standing between the camera and the player fades out, so the player
 // is never lost behind a trunk. The camera is a fixed orthographic iso offset
@@ -238,7 +247,7 @@ export function createTrees(): THREE.Group {
   //
   // Both carry `fade` for the per-instance occlusion dither.
   const barkMat = voxelMaterial({ fade: true, tex: 'bark' });
-  const leafMat = voxelMaterial({ fade: true, tex: 'leaf' });
+  const leafMat = voxelMaterial({ fade: true, tex: 'leaf', wind: true });
 
   const trunk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), barkMat, MAX_TREES);
   const leaves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), leafMat, MAX_LEAVES);
@@ -267,9 +276,10 @@ export function createTrees(): THREE.Group {
   let n = 0;
   let nLeaf = 0;
 
-  // Rebuild the trunk occupancy from scratch every call, so a second
-  // createTrees() cannot inherit the previous one's trees.
+  // Rebuild the trunk occupancy and tree locations from scratch every call,
+  // so a second createTrees() cannot inherit the previous one's trees.
   trunkCells.clear();
+  treeLocations.length = 0;
 
   for (let j = 0; j < GRID && n < MAX_TREES; j++) {
     for (let i = 0; i < GRID && n < MAX_TREES; i++) {
@@ -347,6 +357,9 @@ export function createTrees(): THREE.Group {
 
       // --- layer 3: a single cube at the very top of the trunk ---
       putLeaf(x, canopyY + 2 * LEAF_H, z, leaf);
+
+      // record the tree canopy location for falling leaves
+      treeLocations.push({ x, z, groundY, canopyY });
 
       n++;
     }

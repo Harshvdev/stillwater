@@ -31,6 +31,21 @@ export const PALETTE = {
   // A yellow bloom cannot also have a yellow centre, or the two merge and the
   // flower goes back to being one flat shape.
   flowerCentreWarm: 0xd4682a,
+  // Tall grass: the meadow's ground cover, filling the ground between the flower
+  // drifts. Two tones, mixed across the blades of a single tuft, because one flat
+  // green reads as a solid object while two reads as a plant.
+  //
+  // Both sit below the grass ramp's darkest entry (0x74bb4b) on purpose. A blade
+  // the same value as the ground it grows out of is invisible, and tall grass
+  // that you cannot see is not worth the instances.
+  //
+  // But only just below. The first pass at this was a step darker still, and a
+  // tuft read as a dark hole punched in the meadow rather than as grass standing
+  // up out of it - the blades are thin enough that most of what you see of one is
+  // its shadowed side, so a dark albedo lands darker on screen than it looks on
+  // paper. These hold about 1.35:1 against the darkest grass, which is the most
+  // separation that still reads as cover rather than as damage.
+  tallGrass: [0x70b248, 0x5ea03e, 0x4d8a34],
 
   // tree bark - a grey-brown, cooler than the earth ramp, so a trunk reads as
   // wood rather than as a slice of the cliff it stands on

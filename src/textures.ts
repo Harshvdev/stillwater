@@ -150,3 +150,145 @@ export function blockTexture(kind: 'ground' | 'bark' | 'leaf'): THREE.DataTextur
   if (kind === 'leaf') return (leafTex ??= makeLeaf());
   return (groundTex ??= makeGround());
 }
+
+// ------------------------------------------------------- tall grass masks
+//
+// These are not multipliers like the three above: they are alpha masks, and that
+// difference is the whole reason tall grass is shaped the way it is.
+//
+// The block textures modulate a cube face, because a cube is solid and all it
+// needs is surface variation. Tall grass is not solid - Minecraft draws it as a
+// pair of crossed, alpha-cutout planes - so what it needs is a SHAPE. Tapered
+// blades rising out of the bottom of the texture, cut out of an opaque
+// background, which is what turns a rectangle into a tuft.
+//
+// Only alpha is authored here. RGB is left white and the green comes from the
+// material and its per-instance colour, so palette.ts stays the thing that
+// decides what colour grass is.
+//
+// THREE masks, not one, because a meadow of identical tufts is the same mistake
+// as a forest of identical trees. The three are genuinely different silhouettes
+// rather than one shape at three heights: a low dense clump, a tall leaning fan,
+// and a sparse upright spike. They differ in blade count, blade width and how
+// hard each blade leans, which is what the eye reads as "different plant" rather
+// than "same plant, further away".
+
+export type GrassKind = 'sprout' | 'tuft' | 'cluster';
+
+const BLADE_SIZE = 16;
+
+/**
+ * Handcrafted 16x16 pixel-art grass blade designs.
+ *
+ * Each design is authored with distinct silhouette, solid base anchoring,
+ * and 2-tone depth:
+ *   '.' = transparent
+ *   '#' = bright sunlit blade highlight (100% brightness)
+ *   'x' = shaded blade contour / depth tone (78% brightness)
+ *
+ * This eliminates the sub-texel speckling that broken mathematical procedural formulas cause.
+ */
+const BLADE_PATTERNS: Record<GrassKind, readonly string[]> = {
+  // Blade 1: "sprout" - graceful curved primary blade with an angled side shoot
+  sprout: [
+    '................',
+    '.......#x.......',
+    '......##xx......',
+    '......##xx......',
+    '.......##xx.....',
+    '.......##xx.....',
+    '........##xx....',
+    '........##xx....',
+    '....#x..##xx....',
+    '...##xx..##xx...',
+    '...##xx..##xx...',
+    '...##xx..##xx...',
+    '...####xxxxxx...',
+    '...####xxxxxx...',
+    '....###xxxxx....',
+    '.....##xxxx.....',
+  ],
+
+  // Blade 2: "tuft" - classic splayed double blade with clean V-shape
+  tuft: [
+    '................',
+    '..#x........#x..',
+    '.##xx......##xx.',
+    '.##xx......##xx.',
+    '..##xx....##xx..',
+    '..##xx....##xx..',
+    '...##xx..##xx...',
+    '...##xx..##xx...',
+    '...####xxxxxx...',
+    '....###xxxxx....',
+    '....###xxxxx....',
+    '....###xxxxx....',
+    '...####xxxxxx...',
+    '...####xxxxxx...',
+    '....###xxxxx....',
+    '.....##xxxx.....',
+  ],
+
+  // Blade 3: "cluster" - lush three-blade meadow crown
+  cluster: [
+    '................',
+    '.......#x.......',
+    '......##xx......',
+    '......##xx......',
+    '..#x..##xx..#x..',
+    '.##xx.##xx.##xx.',
+    '.##xx.##xx.##xx.',
+    '..##xx##xx##xx..',
+    '..##xxxxxxxxx...',
+    '...####xxxxxx...',
+    '...####xxxxxx...',
+    '....###xxxxx....',
+    '....###xxxxx....',
+    '....###xxxxx....',
+    '.....##xxxx.....',
+    '......xxxx......',
+  ],
+};
+
+function makeBladeMask(rows: readonly string[]): THREE.DataTexture {
+  const data = new Uint8Array(BLADE_SIZE * BLADE_SIZE * 4);
+  for (let y = 0; y < BLADE_SIZE; y++) {
+    // Row 0 in array is top of blade (v = 1.0), row 15 is root at ground level (v = 0.0)
+    const rowStr = rows[BLADE_SIZE - 1 - y];
+    for (let x = 0; x < BLADE_SIZE; x++) {
+      const ch = rowStr[x];
+      const i = (y * BLADE_SIZE + x) * 4;
+      if (ch === '#') {
+        data[i] = 255;
+        data[i + 1] = 255;
+        data[i + 2] = 255;
+        data[i + 3] = 255;
+      } else if (ch === 'x' || ch === 'X') {
+        data[i] = 198;
+        data[i + 1] = 198;
+        data[i + 2] = 198;
+        data[i + 3] = 255;
+      } else {
+        data[i] = 0;
+        data[i + 1] = 0;
+        data[i + 2] = 0;
+        data[i + 3] = 0;
+      }
+    }
+  }
+  const tex = new THREE.DataTexture(data, BLADE_SIZE, BLADE_SIZE, THREE.RGBAFormat);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const grassMasks: Partial<Record<GrassKind, THREE.DataTexture>> = {};
+
+export function grassMask(kind: GrassKind): THREE.DataTexture {
+  return (grassMasks[kind] ??= makeBladeMask(BLADE_PATTERNS[kind]));
+}
