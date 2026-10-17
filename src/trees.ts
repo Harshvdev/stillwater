@@ -230,10 +230,18 @@ export function createTrees(): THREE.Group {
   // plain material, not the terrain's banded one: a tree is a solid object, so
   // the per-voxel-row depth falloff would only fight the silhouette. `fade` adds
   // the per-instance occlusion dither.
-  const mat = voxelMaterial({ fade: true });
+  // Two materials, not one. A trunk and a leaf cube are both unit boxes fed
+  // from the same instance buffers, but they want opposite textures: the trunk
+  // needs vertical grain and the canopy needs a fine dapple, and each is worth
+  // its own program rather than a blend of the two. Still 2 draw calls - the
+  // instanced meshes were always separate.
+  //
+  // Both carry `fade` for the per-instance occlusion dither.
+  const barkMat = voxelMaterial({ fade: true, tex: 'bark' });
+  const leafMat = voxelMaterial({ fade: true, tex: 'leaf' });
 
-  const trunk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, MAX_TREES);
-  const leaves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, MAX_LEAVES);
+  const trunk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), barkMat, MAX_TREES);
+  const leaves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), leafMat, MAX_LEAVES);
   trunk.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_TREES * 3), 3);
   leaves.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_LEAVES * 3), 3);
   // a trunk or leaf is one solid colour on every face, so its top-colour

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { COAST_RADII, COAST_SAMPLES } from './coast';
 import { PALETTE, pick } from './palette';
+import { blockTexture } from './textures';
 
 // ---------------------------------------------------------------- coast port
 // Verbatim from the 3d original, so the island silhouette is identical.
@@ -218,11 +219,20 @@ const edgeColor = new THREE.Color().setHex(PALETTE.edgeLine, THREE.SRGBColorSpac
 const EDGE_COL_GLSL = `vec3(${edgeColor.r.toFixed(4)}, ${edgeColor.g.toFixed(4)}, ${edgeColor.b.toFixed(4)})`;
 
 export function voxelMaterial(opts: {
-  bands?: boolean; outline?: boolean; fade?: boolean; rough?: number; metal?: number;
+  bands?: boolean; outline?: boolean; fade?: boolean; tex?: 'ground' | 'bark' | 'leaf';
+  rough?: number; metal?: number;
 } = {}): THREE.MeshStandardMaterial {
   const bands = opts.bands === true;
   const outline = opts.outline === true;
   const fade = opts.fade === true;
+  // `tex` picks the block texture this material draws on every face - the grass
+  // block's tufted noise, a log's vertical grain, a leaf block's mottling - and it
+  // is the one shading term that needs the fragment's world position, because
+  // each of those patterns is a function of where on the voxel lattice the
+  // fragment lands rather than of anything per-instance. A trunk is a single
+  // stretched box and every leaf cube is a flat facet, so neither can carry a
+  // texture any other way.
+  const tex = opts.tex;
   // `fade` reads a per-instance aFade (1 = solid, lower = see-through) and
   // punches a screen-door dither of holes rather than blending with alpha.
   //
@@ -246,8 +256,9 @@ export function voxelMaterial(opts: {
   // every variant compiles from one onBeforeCompile source, so the cache key has
   // to name exactly which combination this material is
   mat.customProgramCacheKey = () =>
-    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}`;
+    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}:${tex ?? 'none'}`;
   mat.onBeforeCompile = (shader) => {
+    if (tex) shader.uniforms.uBlockTex = { value: blockTexture(tex) };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -257,7 +268,8 @@ varying vec3 vTopColor;
 varying float vTopMix;
 ${bands ? 'attribute float aBandTop;\nvarying float vBandTop;\nvarying float vWorldY;' : ''}
 ${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}
-${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}`
+${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}
+${tex ? 'varying vec3 vWorldPos;\nvarying vec3 vTexNormal;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
@@ -266,7 +278,16 @@ vTopColor = aTop;
 vTopMix = step(0.5, normal.y);
 ${bands ? 'vBandTop = aBandTop;\nvWorldY = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;' : ''}
 ${outline ? 'vExpose = aExpose;\nvLocal = position;' : ''}
-${fade ? 'vFade = aFade;' : ''}`
+${fade ? 'vFade = aFade;' : ''}
+${
+  tex
+    ? `vWorldPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+// The instance matrices here are scale-and-translate with no rotation, and a
+// box's normals are axis-aligned to begin with, so the raw attribute is already
+// the direction the face points in world space. Only its sign is ever tested.
+vTexNormal = normal;`
+    : ''
+}`
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -287,6 +308,33 @@ varying vec3 vLocal;
 const float EDGE_HALF = ${EDGE_HALF.toFixed(4)};
 const vec3 EDGE_COL = ${EDGE_COL_GLSL};
 const float EDGE_VOXEL = ${VOXEL.toFixed(1)};` : ''}
+${tex ? `varying vec3 vWorldPos;
+varying vec3 vTexNormal;
+uniform sampler2D uBlockTex;
+
+// Where on this face's texture a fragment sits.
+//
+// fract() of the world position is the position *within* the voxel, so the
+// texture is locked to the block: it cannot drift, cannot crawl as the camera
+// pans, and every block shows the same image the way a Minecraft block does. A
+// trunk, which is one stretched box rather than a stack of boxes, gets this for
+// free: each of its unit rows samples the full texture once, so it reads as the
+// stack of blocks it is.
+//
+// The two axes come from the face normal rather than being assumed, so a texture
+// reads the same on a block's top as on its side instead of being smeared along
+// whichever axis happened to be picked.
+vec2 faceUV(vec3 worldPos, vec3 nrm) {
+  vec3 f = fract(worldPos);
+  return abs(nrm.y) > 0.5 ? f.xz : (abs(nrm.x) > 0.5 ? f.zy : f.xy);
+}
+
+// The block texture, sampled. It stores a brightness multiplier rather than a
+// colour, so the palette in palette.ts stays the thing that decides what grass,
+// sand and leaves actually are - see textures.ts.
+float blockTex(vec3 worldPos, vec3 nrm) {
+  return texture2D(uBlockTex, faceUV(worldPos, nrm)).r;
+}` : ''}
 ${fade ? `varying float vFade;
 // 4x4 ordered dither, 0..15, as a pure function of screen position. Declared
 // here rather than inline in main(), where GLSL will not accept a definition.
@@ -307,6 +355,46 @@ float bayer4(vec2 c) {
 // The grass-block split: top face takes aTop, everything else keeps the
 // instance colour. Albedo only - the lights do all the shading from here.
 diffuseColor.rgb = mix(diffuseColor.rgb, vTopColor, vTopMix);
+${tex === 'ground' ? `// GROUND: the grass block's texture.
+//
+// One image serves every terrain face, and that is a deliberate consequence of
+// the multiplier approach rather than a shortcut. A grass block's sides are dirt,
+// so the same grain reads as dirt texture there; on the beach and the cliffs it
+// reads as fine speckle. The alternative - a texture only grass has - would
+// leave every other surface in the scene as bare colour, which is the thing this
+// whole change exists to stop.
+//
+// Pushed well down from its sampled value on purpose. The texture carries real
+// contrast, but a terrain face is the largest area on screen and the eye reads a
+// strong pattern there as a printed-on design; at this strength it reads as a
+// surface.
+diffuseColor.rgb *= 1.0 + (blockTex(vWorldPos, vTexNormal) - 1.0) * 0.42;` : ''}
+${tex === 'bark' ? `// BARK: the log block's texture.
+//
+// A trunk is one stretched box, so every instance carries a single bark colour
+// and the column came out as one flat brown rectangle no matter how wide the bark
+// ramp is. The ramp's range was only ever being used *between* trunks. The
+// texture is what finally puts it to work *within* one, and at full strength -
+// bark is small on screen, so unlike the ground it can afford its full contrast.
+diffuseColor.rgb *= blockTex(vWorldPos, vTexNormal);` : ''}
+${tex === 'leaf' ? `// LEAF: the leaf block's texture.
+//
+// A canopy is Minecraft's noisiest block, and here every cube in it was one flat
+// facet, so a canopy lit from above came out as a stack of smooth plastic chips.
+//
+// At full strength, which is the opposite of the rule the ground texture runs
+// under, and for the same reason the ramp is narrow instead: both of those are
+// about keeping a *large area* from reading as a pattern. This is the reverse -
+// each face is small, so it can carry the noise at full contrast and look like a
+// clump of leaves.
+//
+// It cannot reopen the dawn hole. What made canopies look transparent was a large
+// brightness step between two whole *cubes* - you could see the meadow through
+// the gap. This varies within a face, which averages out across the block and so
+// cannot open a gap between two of them. The two constraints stay separate on
+// purpose: PALETTE.leaf stays narrow between cubes, this does the work inside
+// them.
+diffuseColor.rgb *= blockTex(vWorldPos, vTexNormal);` : ''}
 ${bands ? `// Sky occlusion down a shaft. This is a light-attenuation term, not a
 // face shade: the cliff's normal is constant over every row of the stretched
 // base box, so without this a lit cliff is one dead-even slab. One flat step
@@ -363,7 +451,7 @@ function faceColor(hex: number, c: THREE.Color): void {
 // Splitting them means the sand deform only has to move a cap.
 export function createIsland(): THREE.Group {
   const group = new THREE.Group();
-  const mat = voxelMaterial({ bands: true, outline: true });
+  const mat = voxelMaterial({ bands: true, outline: true, tex: 'ground' });
   const max = GRID * GRID;
 
   // The cap and the base each index their own instance space: the cap counts
@@ -429,10 +517,22 @@ export function createIsland(): THREE.Group {
       const level = levels[k];
 
       const kind = kindOf(h, level);
-      // two smooth octaves so colour drifts form soft patches; the small hash
-      // term only dithers band edges, it must not make every cell differ
-      const r = vn(i * 0.13, j * 0.13, 5) * 0.68 + vn(i * 0.38, j * 0.38, 9) * 0.32 +
-        (hs(i, j, 5) - 0.5) * 0.12;
+      // Two smooth octaves so colour drifts form soft patches, plus a per-cell
+      // hash.
+      //
+      // The hash used to be +-0.06, which is a *quarter of one ramp step* (a
+      // step is a quarter of the range). Neighbouring cells therefore almost
+      // always landed on the same palette entry, and the meadow read as one flat
+      // sheet of plastic at every hour. The grass ramp is only 1.34:1 end to end,
+      // so per-cell variation is the only thing that can give it texture at all -
+      // and a quarter of a step cannot.
+      //
+      // It is now +-0.14, over half a step, so two adjacent cells differ about
+      // as often as not while the octaves above still hold the result together
+      // into patches. Every term still varies on the cell grid, so the pattern is
+      // locked to the voxels and cannot crawl as the camera pans.
+      const r = vn(i * 0.13, j * 0.13, 5) * 0.66 + vn(i * 0.38, j * 0.38, 9) * 0.26 +
+        (hs(i, j, 5) - 0.5) * 0.28;
       const r2 = hs(i, j, 19);
 
       // surface colour of the top cube
