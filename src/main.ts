@@ -15,6 +15,10 @@ import {
   dayState, advanceDayNight, getHour, setHour, isRunning, setRunning,
   getCycleLength, setCycleLength,
 } from './daynight';
+// TEMPORARY: the day/night test panel. Delete src/daySlider.ts and the three
+// lines naming it (this import, `initDaySlider()` and `syncDaySlider()`) to
+// remove it; nothing else reads from it.
+import { initDaySlider, syncDaySlider } from './daySlider';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -310,6 +314,8 @@ function main(): void {
   const sand = createSandDeform();
 
   initInput();
+  // TEMPORARY: builds the panel. See the import at the top.
+  initDaySlider();
 
   /**
    * Push the solved time of day onto the lights and the fog.
@@ -364,6 +370,8 @@ function main(): void {
     const t = clock.elapsedTime;
     advanceDayNight(dt);
     updateLights();
+    // TEMPORARY: keeps the panel reading the live hour. See the import above.
+    syncDaySlider();
     updatePlayer(player, dt);
     sand.update(dt, player.position);
     updateWater(t);
