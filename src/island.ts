@@ -647,57 +647,194 @@ export function getTerrainMesh(): THREE.InstancedMesh {
 }
 
 // --------------------------------------------------------------- flora
-// Flower cubes speckled over the grass in drifts, the way the original's
-// flower hash clustered them, rather than an even sprinkle over every cell.
-export function createFlowers(): THREE.InstancedMesh {
-  // 4x the cells means 4x the candidates, so the cap and the bloom offset both
-  // scale with the finer grid. 0.3 cube was 15% of a 2-unit voxel; keep that
-  // ratio against the 1-unit voxel.
-  const max = 12288;
-  const size = VOXEL * 0.15;
-  const geo = new THREE.BoxGeometry(size, size, size);
-  // fully matte: a petal has no specular lobe, and at this size any highlight
-  // would just read as noise
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
-  const mesh = new THREE.InstancedMesh(geo, mat, max);
-  mesh.frustumCulled = false;
+//
+// The plus a bloom's four petals sit in, and how many flowers the island grows.
+const PETAL_PLUS: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+// Upper bound on flowers, which is what the sub-meshes are sized against - a
+// flower is six instances, so this is a bound on parts too. Set far above what
+// FLOWER_CHANCE actually produces, which is a few hundred, so the cap can never
+// be what limits the island.
+const MAX_FLOWERS = 1024;
+
+// Of the cells a drift mask admits, the fraction that actually grows a flower.
+//
+// FLOWER_CHANCE * (the drift mask's own pass rate) lands at about one flower per
+// thirty grass cells. See the note at the gate in createFlowers for why the old
+// density is not just lower but unusable at this size.
+//
+// The first pass at this was 0.09 and came out at one in fifty-four, not thirty:
+// the drift mask is smooth value noise, so it does not pass a flat 38% of cells
+// the way a coin flip would - it passes whole regions of the meadow and none of
+// the others, and the product comes out lower than either factor suggests.
+const FLOWER_CHANCE = 0.16;
+// Flowers on the grass, in drifts, the way the original's flower hash clustered
+// them rather than an even sprinkle over every cell.
+//
+// A flower OCCUPIES ONE BLOCK. It used to be a single 0.15-unit cube sitting on
+// the surface, which was 0.2% of the frame at the default zoom - a speck of
+// paint that only registered as colour. A flower is now built from six small
+// cubes inside its cell: a stem, a plus of four petals and a contrasting centre.
+// At the default zoom that is about fifteen pixels tall, which is enough for a
+// stem and a bloom to be separately visible.
+//
+// The cell is the unit of placement and of ownership: a flower is centred on
+// its cell (never straddling two) and its total height stays under one VOXEL, so
+// it can never poke into the cell above and break the block grid.
+//
+// Six sub-cubes per flower means six instances, which is why the sub-meshes are
+// built to the number of flowers rather than to a cell count.
+export function createFlowers(): THREE.Group {
+  const group = new THREE.Group();
+
+  // Proportions, all relative to the 1-unit voxel.
+  //
+  // The bloom is a plus of four petals around a centre: at ~15px of screen per
+  // flower a five-cube head is the most that still reads as a flower rather than
+  // as a smudge, and a flat single cube is what this replaced.
+  // Proportions, all relative to the 1-unit voxel.
+  //
+  // The bloom is a plus of four petals around a centre: at ~15px of screen per
+  // flower a five-cube head is the most that still reads as a flower rather than
+  // as a smudge, and a flat single cube is what this replaced.
+  //
+  // The first pass had a 0.74-wide head over a 0.62-tall stem, and a head wider
+  // than the stem is tall is the proportion that reads as a mushroom. Slimming
+  // the stem and the petals fixes that; the head is now narrower than the flower
+  // is tall, which is what a flower looks like from a distance.
+  const STEM_W = 0.16;
+  const STEM_H = 0.62;
+  const PETAL = 0.2;
+  const PETAL_H = 0.17;
+  const CENTRE = 0.19;
+  // Taller than the petals on purpose. The centre shares a y with them, so the
+  // extra height is what pushes its top face clear of the petal ring - without
+  // that the core sits down inside the bloom and the head is one flat lump.
+  const CENTRE_H = 0.28;
+  // Petal centres sit far enough out to touch the centre cube and each other, so
+  // the bloom is one connected shape and not four loose cubes near a dot.
+  const BLOOM_OFF = (CENTRE + PETAL) / 2;
+
+  // fully matte: a petal has no specular lobe, and at fifteen pixels any
+  // highlight would just read as noise
+  const matte = { roughness: 1, metalness: 0 };
+
+  const stemMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(STEM_W, 1, STEM_W),
+    new THREE.MeshStandardMaterial({ ...matte, color: PALETTE.flowerStem }),
+    MAX_FLOWERS
+  );
+  // The petals and the centres carry an instance colour each: one mesh holds all
+  // three bloom kinds rather than three meshes holding one kind apiece.
+  const petalMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(PETAL, PETAL_H, PETAL),
+    new THREE.MeshStandardMaterial({ ...matte, color: 0xffffff }),
+    MAX_FLOWERS * 4
+  );
+  petalMesh.instanceColor = new THREE.InstancedBufferAttribute(
+    new Float32Array(MAX_FLOWERS * 4 * 3), 3
+  );
+  const centreMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(CENTRE, CENTRE_H, CENTRE),
+    new THREE.MeshStandardMaterial({ ...matte, color: 0xffffff }),
+    MAX_FLOWERS
+  );
+  centreMesh.instanceColor = new THREE.InstancedBufferAttribute(
+    new Float32Array(MAX_FLOWERS * 3), 3
+  );
+  for (const mesh of [stemMesh, petalMesh, centreMesh]) {
+    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+
   const m = new THREE.Matrix4();
   const c = new THREE.Color();
-  let n = 0;
+  let nStem = 0;
+  let nPetal = 0;
+  let nCentre = 0;
 
-  for (let j = 0; j < GRID && n < max; j++) {
-    for (let i = 0; i < GRID && n < max; i++) {
+  for (let j = 0; j < GRID && nStem < MAX_FLOWERS; j++) {
+    for (let i = 0; i < GRID && nStem < MAX_FLOWERS; i++) {
       // grass rim and up; LEVEL_BEACH is the old hardcoded 2
       if (levels[j * GRID + i] < LEVEL_GRASS) continue;
-      // a low-frequency mask decides where flowers are allowed to grow at all.
-      // The noise is sampled per cell, so the frequency is halved to keep each
-      // drift the same physical size now that cells are half as wide.
-      //
-      // There is no second coin-flip gate here. There are 4x as many cells as
-      // before, so keeping the same per-cell probability would thin the flowers
-      // to a quarter of their old density; the drift mask alone already lands
-      // near the original count, and it keeps them clustered the way the
-      // original's flower hash did.
+
+      // WHERE flowers are allowed to grow: a low-frequency mask, sampled per
+      // cell, so they clump into drifts instead of dusting the whole meadow.
+      // This part is unchanged from the speck version and worth keeping exactly
+      // as it is - the drift shape is good.
       if (vn(i * 0.045, j * 0.045, 61) < 0.62) continue;
+
+      // HOW MANY of those cells actually grow one. This is new, and it is the
+      // whole reason the meadow still looks like a meadow.
+      //
+      // The old version put a flower on every cell the drift mask let through -
+      // about one in five grass cells, which was tuned for specks, where density
+      // is the only thing making a flower visible at all. A flower now covers a
+      // good fraction of its cell and stands a block tall, so that same rate
+      // carpets roughly a fifth of the island in flower and there is no meadow
+      // left to be pretty. A flower is legible at about a tenth the density of a
+      // speck, so the gate cuts by roughly that much again on top.
+      if (hs(i, j, 59) > FLOWER_CHANCE) continue;
+
       const topY = levels[j * GRID + i] * VOXEL;
-      const rx = hs(i, j, 41);
-      const rz = hs(i, j, 43);
-      const x = cellX(i) + (rx - 0.5) * VOXEL * 0.7;
-      const z = cellZ(j) + (rz - 0.5) * VOXEL * 0.7;
+      // Centred on its own cell, with a jitter well under half a cell so the
+      // flower always reads as belonging to one block rather than straddling two.
+      const x = cellX(i) + (hs(i, j, 41) - 0.5) * VOXEL * 0.2;
+      const z = cellZ(j) + (hs(i, j, 43) - 0.5) * VOXEL * 0.2;
+
+      // Stem height varies a little per flower. A field of identical posts reads
+      // as a fence; this keeps a drift looking grown rather than placed, and it
+      // costs one hash and a scale.
+      //
+      // The top of that range is bounded by the one-block budget. The tallest
+      // flower is STEM_H * 1.08 + CENTRE_H = 0.95, and it has to stay under
+      // VOXEL: a flower poking into the cell above breaks the block grid, and a
+      // jittered stem can push it sideways into its neighbour's cell at the same
+      // time. This is the number to lower first if the flower ever grows.
+      const stemH = STEM_H * (0.88 + hs(i, j, 71) * 0.2);
+      m.makeScale(1, stemH, 1);
+      m.setPosition(x, topY + stemH / 2, z);
+      stemMesh.setMatrixAt(nStem, m);
+
       const kind = hs(i, j, 47);
+      const warm = kind > 0.38 && kind <= 0.82;   // the yellow blooms
       c.setHex(
-        kind > 0.82 ? PALETTE.flowerPink : kind > 0.38 ? PALETTE.flowerYellow : PALETTE.flowerWhite,
+        kind > 0.82 ? PALETTE.flowerPink : warm ? PALETTE.flowerYellow : PALETTE.flowerWhite,
         THREE.SRGBColorSpace
       );
-      m.setPosition(x, topY + size / 2, z);
-      mesh.setMatrixAt(n, m);
-      mesh.setColorAt(n, c);
-      n++;
+      c.toArray(petalMesh.instanceColor!.array, nPetal * 3);
+      c.setHex(warm ? PALETTE.flowerCentreWarm : PALETTE.flowerCentre, THREE.SRGBColorSpace);
+      c.toArray(centreMesh.instanceColor!.array, nCentre * 3);
+
+      // The centre sits on top of the stem, slightly proud of the petals: it is
+      // the one part of the bloom that should catch the light rather than sit
+      // flat inside the head.
+      m.makeScale(1, 1, 1);
+      m.setPosition(x, topY + stemH + CENTRE_H / 2, z);
+      centreMesh.setMatrixAt(nCentre, m);
+
+      // The plus of four petals around it.
+      for (const [dx, dz] of PETAL_PLUS) {
+        m.setPosition(x + dx * BLOOM_OFF, topY + stemH + CENTRE_H / 2, z + dz * BLOOM_OFF);
+        petalMesh.setMatrixAt(nPetal, m);
+        c.toArray(petalMesh.instanceColor!.array, nPetal * 3);
+        nPetal++;
+      }
+
+      nCentre++;
+      nStem++;
     }
   }
 
-  mesh.count = n;
-  mesh.instanceMatrix.needsUpdate = true;
-  mesh.instanceColor!.needsUpdate = true;
-  return mesh;
+  stemMesh.count = nStem;
+  petalMesh.count = nPetal;
+  centreMesh.count = nCentre;
+  stemMesh.instanceMatrix.needsUpdate = true;
+  petalMesh.instanceMatrix.needsUpdate = true;
+  centreMesh.instanceMatrix.needsUpdate = true;
+  petalMesh.instanceColor!.needsUpdate = true;
+  centreMesh.instanceColor!.needsUpdate = true;
+  return group;
 }

@@ -269,9 +269,10 @@ function main(): void {
 
   const island = createIsland();
   const trees = createTrees();
+  const flowers = createFlowers();
   scene.add(island);
   scene.add(trees);
-  scene.add(createFlowers());
+  scene.add(flowers);
 
   const { mesh: water, ocean } = createWater();
   scene.add(water);
@@ -287,6 +288,18 @@ function main(): void {
     }
   });
   trees.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+  });
+  // The flowers are in this list now, and that is a consequence of them becoming
+  // solid rather than being a separate decision. A 0.15-unit speck with
+  // receiveShadow off was invisible inside a tree's shadow, because there was
+  // nothing there to notice. A flower is a block tall and casts and receives
+  // like anything else: excluded, it would stay bright while the grass around it
+  // darkened and read as pasted on top of the meadow.
+  flowers.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) {
       o.castShadow = true;
       o.receiveShadow = true;

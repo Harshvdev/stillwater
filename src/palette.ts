@@ -15,6 +15,22 @@ export const PALETTE = {
   flowerWhite: 0xf6f4e8,
   flowerYellow: 0xe8b028,
   flowerPink: 0xe87aa0,
+  // A flower is a stem and a bloom now, not one cube, so the palette needs the
+  // two parts the old single colour had no room for.
+  //
+  // The stem sits a clear step below the grass ramp's darkest entry on purpose.
+  // A stem as light as the grass it grows out of vanishes into the meadow at the
+  // default zoom, where a whole flower is about fifteen pixels tall - and a
+  // flower with no visible stem reads as a floating cube, which is the exact
+  // thing this replaced.
+  flowerStem: 0x4a8c3c,
+  // The bloom's centre. A contrasting core is most of what makes a flower read
+  // as a flower rather than as a coloured lump, and it is the smallest part of
+  // the bloom, so the contrast is doing real work at very little size.
+  flowerCentre: 0xf0c020,     // against the white and pink blooms
+  // A yellow bloom cannot also have a yellow centre, or the two merge and the
+  // flower goes back to being one flat shape.
+  flowerCentreWarm: 0xd4682a,
 
   // tree bark - a grey-brown, cooler than the earth ramp, so a trunk reads as
   // wood rather than as a slice of the cliff it stands on
