@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { VOXEL, SEA_Y, voxelMaterial, levelAtWorld } from './island';
 import { PALETTE } from './palette';
-import { SUN_DIR } from './sky';
+import { dayState } from './daynight';
 
 // voxel sea: one column per water cell, stretched from the seabed up to the
 // waterline so the depth steps read as terraced blocks. Colours come from a
@@ -75,26 +75,19 @@ const GLINT_MIX = 0.62;
 // azimuth so its shadows would fall across the view instead of hiding behind
 // their own casters, which invalidated the literal.
 //
-// So it is computed now, from the shared SUN_DIR and the same fixed isometric
-// view direction camera.ts uses. Move the sun again and the reflection follows
-// it, which is the only version of this that cannot rot.
+// Now that the sun travels, no fixed value can be right: the axis is re-solved
+// from the current key light every update. S is `dayState.keyDir`, which is
+// whichever of the sun and the moon is currently the brighter key, so the
+// band follows the light that is actually making the sparkle rather than
+// following the sun after it has gone down.
 //
 // V is the direction from the water up to the camera. The rig is a fixed
 // (+1, +1, +1) offset, and only the direction matters for a reflection, so the
 // ISO_OFFSET magnitude is irrelevant here.
-const GLITTER_AXIS = (() => {
-  const V = new THREE.Vector3(1, 1, 1).normalize();
-  const h = V.clone().add(SUN_DIR);
-  h.y = 0;
-  // Degenerate only if the sun is exactly opposite the camera's azimuth, in
-  // which case there is no specular path on the water at all.
-  if (h.lengthSq() < 1e-6) return { x: 0, z: 1 };
-  h.normalize();
-  return { x: h.x, z: h.z };
-})();
+const GLITTER_AXIS = { x: 0, z: 1 };
 // Unit vector across the path, so distance from the band is measured
 // perpendicular to it rather than along world axes.
-const GLITTER_ACROSS = { x: -GLITTER_AXIS.z, z: GLITTER_AXIS.x };
+const GLITTER_ACROSS = { x: 0, z: 1 };
 
 // How far from the path's centreline a cell can be and still glint at all.
 // The falloff past this is smooth, so the band has soft edges like a real
@@ -130,10 +123,35 @@ const GLINT_FALLOFF = 2.2;
 // 9 units was carried over from the old hand-tuned literal, where it put the
 // core just clear of the island's south-east shore.
 const GLINT_BAND_DIST = 9;
-const GLINT_ORIGIN = {
-  x: GLITTER_ACROSS.x * GLINT_BAND_DIST,
-  z: GLITTER_ACROSS.z * GLINT_BAND_DIST,
-};
+const GLINT_ORIGIN = { x: 0, z: 0 };
+
+const _v = new THREE.Vector3();
+const _h = new THREE.Vector3();
+
+/**
+ * Re-solve the reflection geometry for the light that is currently the key.
+ *
+ * Degenerate only when the light is exactly opposite the camera's azimuth, in
+ * which case there is no specular path on the water at all and the fallback
+ * axis keeps the band pointing somewhere harmless.
+ */
+function aimGlitter(): void {
+  _v.set(1, 1, 1).normalize();
+  _h.copy(_v).add(dayState.keyDir);
+  _h.y = 0;
+  if (_h.lengthSq() < 1e-6) {
+    GLITTER_AXIS.x = 0;
+    GLITTER_AXIS.z = 1;
+  } else {
+    _h.normalize();
+    GLITTER_AXIS.x = _h.x;
+    GLITTER_AXIS.z = _h.z;
+  }
+  GLITTER_ACROSS.x = -GLITTER_AXIS.z;
+  GLITTER_ACROSS.z = GLITTER_AXIS.x;
+  GLINT_ORIGIN.x = GLITTER_ACROSS.x * GLINT_BAND_DIST;
+  GLINT_ORIGIN.z = GLITTER_ACROSS.z * GLINT_BAND_DIST;
+}
 
 interface WaterCell {
   x: number;
@@ -241,6 +259,15 @@ export function updateWater(t: number): void {
 
   const topAttr = mesh.geometry.getAttribute('aTop') as THREE.InstancedBufferAttribute;
 
+  // The reflection follows the key light, which moves with the day.
+  aimGlitter();
+  // How bright the sea is allowed to sparkle at all. Drawn from the cycle rather
+  // than from the light rig, because the standard material's own specular lobe
+  // already dims with the light: without this the hand-drawn glints would keep
+  // burning at their authored brightness on a moonless sea, which is the one
+  // thing a night frame must not do.
+  const glint = dayState.glint;
+
   for (let k = 0; k < cells.length; k++) {
     const cell = cells[k];
     const w = cell.w;
@@ -306,7 +333,7 @@ export function updateWater(t: number): void {
         const phase = hs(cell.i, cell.j, 223);
         const tw = Math.abs(((tf * 1.6 + phase) % 1) * 2 - 1);
 
-        const amt = bandW * crestW * tw * GLINT_MIX;
+        const amt = bandW * crestW * tw * GLINT_MIX * glint;
         shadeColor.lerp(GLINT, amt);
         // only the brightest cores are driven past 1.0, and only a little
         shadeColor.multiplyScalar(1 + amt * GLINT_EMIT);

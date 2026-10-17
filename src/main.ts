@@ -10,7 +10,11 @@ import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
 import { createCamera, updateCamera, resizeCamera, setRenderSize } from './camera';
-import { createSky, horizonColor, SUN_DIR, SUN_DISTANCE } from './sky';
+import { createSky, SUN_DISTANCE } from './sky';
+import {
+  dayState, advanceDayNight, getHour, setHour, isRunning, setRunning,
+  getCycleLength, setCycleLength,
+} from './daynight';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -24,8 +28,13 @@ function main(): void {
   // gradient, the sun and the fog can all be made to agree with each other.
   // The fog is keyed to the dome's own horizon colour rather than to a
   // separately chosen palette entry, which is what used to leave a visible
-  // seam where the far ocean met the background.
-  scene.fog = new THREE.Fog(horizonColor().getHex(), 120, 300);
+  // seam where the far ocean met the background. The colour is re-copied from
+  // the dome every frame, because over a day cycle the horizon moves from a
+  // pale blue to a burning orange to near-black.
+  scene.fog = new THREE.Fog(0xbfdcea, 120, 300);
+  // the reference the loop keeps, so the per-frame recolour does not have to
+  // narrow scene.fog back out of its `| null`
+  const fog = scene.fog as THREE.Fog;
 
   const camera = createCamera();
   const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -157,13 +166,31 @@ function main(): void {
   //     +z side face, lit               =  0.88
   //     +x side face, facing away       =  0.31
   //
-  // Those four numbers are the scene's entire sense of form now. The 1.0 /
+  // Those four numbers are the scene's entire sense of form at noon. The 1.0 /
   // 0.42 pair is what the baked FACE_SHADE table used to fake between top and
   // side; the 1.0 / 0.31 pair is what keeps each block reading as a solid with
   // a lit corner and a shaded one, rather than as a flat coloured lozenge.
-  scene.add(new THREE.HemisphereLight(0xdcefff, 0xc9a87e, 1.73));
+  //
+  // daynight.ts moves all three of these numbers over the course of a day, and
+  // noon is the stop they are pinned to, so the frame above is the reference
+  // every other hour is interpolated away from.
+  const hemi = new THREE.HemisphereLight(0xdcefff, 0xc9a87e, 1.73);
+  scene.add(hemi);
+
   const sun = new THREE.DirectionalLight(0xfff2dc, 3.78);
   sun.castShadow = true;
+
+  // The moon's key. A second directional light rather than one light that
+  // changes its mind, because at dusk there is a real moment where both are up
+  // and the scene has to be lit by their sum - and because a light that snapped
+  // from one direction to its opposite would drag every shadow in the frame
+  // across the island in a single frame.
+  //
+  // Only one of the two ever casts: each turns its shadow map off the moment
+  // its intensity reaches nothing (see updateLights), so the night costs the
+  // same shadow pass as the day rather than twice it.
+  const moon = new THREE.DirectionalLight(0xa8bdf0, 0);
+  moon.castShadow = false;
 
   // ---------------------------------------------------------------- shadows
   // Tight shadow bounds around the player. The island is 172 voxels across and
@@ -212,7 +239,29 @@ function main(): void {
   scene.add(sun);
   scene.add(sun.target);
 
-  scene.add(createSky());
+  // The moon casts from the other side of the sky, so it needs its own shadow
+  // camera with the same bounds, bias and resolution - otherwise the two would
+  // disagree about how far a shadow reaches and the whole island would change
+  // shape the moment the sun went down.
+  //
+  // Both maps stay allocated for the whole cycle on purpose. Disposing the
+  // out-of-use one would save ~16 MB of depth texture, but it would also mean
+  // reallocating one every sunrise and every sunset, and a 2048x2048 depth
+  // allocation is exactly the kind of thing that shows up as a hitch.
+  moon.shadow.camera.left = -SHADOW_HALF;
+  moon.shadow.camera.right = SHADOW_HALF;
+  moon.shadow.camera.top = SHADOW_HALF;
+  moon.shadow.camera.bottom = -SHADOW_HALF;
+  moon.shadow.camera.near = 25;
+  moon.shadow.camera.far = 250;
+  moon.shadow.mapSize.set(2048, 2048);
+  moon.shadow.bias = -0.0004;
+  moon.shadow.normalBias = 0.05;
+  scene.add(moon);
+  scene.add(moon.target);
+
+  const sky = createSky();
+  scene.add(sky.mesh);
 
   const island = createIsland();
   const trees = createTrees();
@@ -262,6 +311,47 @@ function main(): void {
 
   initInput();
 
+  /**
+   * Push the solved time of day onto the lights and the fog.
+   *
+   * Both keys are parked SUN_DISTANCE out along their own direction from a
+   * target that tracks the player: the shadow camera is orthographic and only
+   * covers SHADOW_HALF around that target, so it has to travel with the player
+   * or shadows simply stop being drawn once they leave the box.
+   */
+  const updateLights = (): void => {
+    sun.color.copy(dayState.sunColor);
+    sun.intensity = dayState.sunIntensity;
+    moon.color.copy(dayState.moonColor);
+    moon.intensity = dayState.moonIntensity;
+    hemi.color.copy(dayState.hemiSky);
+    hemi.groundColor.copy(dayState.hemiGround);
+    hemi.intensity = dayState.hemiIntensity;
+
+    // A key light with nothing left to give stops casting, which is also what
+    // stops three spending a shadow pass on it. The two keys are cross-faded
+    // rather than swapped, so for the few minutes either side of sunrise and
+    // sunset both are briefly lit and both do cast - which is the one moment the
+    // scene is legitimately lit from two directions, and a couple of seconds of
+    // two shadow maps at 1/24th of a ten-minute day is a price worth paying for
+    // a sunrise that does not blink.
+    sun.castShadow = sun.intensity > 0.02;
+    moon.castShadow = moon.intensity > 0.02;
+
+    for (const [light, dir] of [[sun, dayState.sunDir], [moon, dayState.moonDir]] as const) {
+      light.target.position.set(player.position.x, 0, player.position.z);
+      light.target.updateMatrixWorld();
+      light.position.copy(dir).multiplyScalar(SUN_DISTANCE).add(light.target.position);
+      light.updateMatrixWorld();
+    }
+
+    // The far sea has to fade into the same sky it is standing in front of, and
+    // that sky is now a different colour every hour.
+    fog.color.copy(dayState.horizon);
+  };
+
+  updateLights();
+
   window.addEventListener('resize', () => {
     fit();
     resizeComposer();
@@ -272,6 +362,8 @@ function main(): void {
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
     const t = clock.elapsedTime;
+    advanceDayNight(dt);
+    updateLights();
     updatePlayer(player, dt);
     sand.update(dt, player.position);
     updateWater(t);
@@ -279,20 +371,9 @@ function main(): void {
     // fade anything standing between the camera and the player, after the
     // camera has settled on its new position
     updateTreeFade(player.position);
-    // The shadow camera is orthographic and only covers SHADOW_HALF around its
-    // target, so it has to travel with the player or shadows simply stop being
-    // drawn once they leave that box. The light keeps its fixed world position
-    // and only the target moves, which leaves the sun angle unchanged.
-    sun.target.position.set(player.position.x, 0, player.position.z);
-    sun.target.updateMatrixWorld();
-    // Placed along the shared SUN_DIR (see sky.ts) so the dome's sun and the
-    // light that shades the island stay the same sun. Only the horizontal
-    // position follows the player; the offset itself is fixed in world space.
-    sun.position
-      .copy(SUN_DIR)
-      .multiplyScalar(SUN_DISTANCE)
-      .add(sun.target.position);
-    sun.updateMatrixWorld();
+    // The dome's uniforms are bound to live objects, but a ShaderMaterial's
+    // uniforms are only uploaded when it says so.
+    sky.sync();
     // through the composer, not straight to the screen, so bloom is applied
     composer.render();
   });
@@ -301,12 +382,25 @@ function main(): void {
   Object.assign(window as unknown as Record<string, unknown>, {
     __seaY: SEA_Y,
     __groundHeight: (x: number, z: number) => levelAtWorld(x, z) * VOXEL,
-    __three: { renderer, scene, camera, composer, bloom, sun },
+    __three: { renderer, scene, camera, composer, bloom, sun, moon, hemi },
     __updateWater: updateWater,
     __player: player,
+    // jump the clock without waiting for it: park the cycle, set an hour
+    __setHour: (h: number): void => {
+      setRunning(false);
+      setHour(h);
+    },
+    __getHour: getHour,
+    __setRunning: setRunning,
+    __setCycleLength: setCycleLength,
+    __getCycleLength: getCycleLength,
+    __isRunning: isRunning,
+    __day: dayState,
     // one simulation step with no render, so movement can be driven and
     // inspected in environments where rAF is throttled
     __step: (dt = 1 / 60, t = 0): void => {
+      advanceDayNight(dt);
+      updateLights();
       updatePlayer(player, dt);
       sand.update(dt, player.position);
       updateWater(t);
