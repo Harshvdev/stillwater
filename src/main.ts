@@ -20,6 +20,7 @@ import {
 // remove it; nothing else reads from it.
 import { initDaySlider, syncDaySlider } from './daySlider';
 import { updateWind } from './wind';
+import { initCoordinates, syncCoordinates } from './coordinates';
 import { createFallingLeaves, updateFallingLeaves } from './fallingLeaves';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
@@ -387,6 +388,7 @@ function main(): void {
   initInput();
   // TEMPORARY: builds the panel. See the import at the top.
   initDaySlider();
+  initCoordinates();
 
   /**
    * Push the solved time of day onto the lights and the fog.
@@ -446,6 +448,8 @@ function main(): void {
     // TEMPORARY: keeps the panel reading the live hour. See the import above.
     syncDaySlider();
     updatePlayer(player, dt);
+    // after the player has moved, so the readout is this frame's position
+    syncCoordinates(player.position);
     sand.update(dt, player.position);
     updateWater(t);
     updateCamera(camera, player.position);
