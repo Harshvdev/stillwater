@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VOXEL, SEA_Y, levelAtWorld } from './island';
-import { getMoveInput } from './input';
+import { getMoveInput, isJumpHeld } from './input';
 import { treeBlocks } from './trees';
 import { PALETTE } from './palette';
 
@@ -22,6 +22,24 @@ const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
 // facings exactly where they were and just slots the four in-between.
 const TURN = Math.PI / 4;
 const BASE_FACING = Math.PI / 4;
+
+// ------------------------------------------------------------------- vertical
+// Gravity and the jump impulse, in world units (a voxel is 1, so these are also
+// blocks and blocks per second).
+//
+// GRAVITY is high on purpose. A real 9.8 would put the jump's rise and fall
+// somewhere around half a second, which at a 1.3-block apex reads as a wobble
+// rather than a hop, and would make the figure spend longer in the air than on
+// the ground - the walk cycle would keep animating while the player was visibly
+// suspended. 30 puts a full hop in about 0.55s.
+//
+// JUMP_SPEED is then whatever clears MAX_STEP comfortably with a little to
+// spare: the apex is v^2/2g = 8.3^2/60 = 1.15 blocks, against a 1-block step.
+// So a jump is not strictly required to clear an ordinary step - it is what it
+// takes to get back up onto one you have walked off, and it is comfortably
+// enough to reach a 2-block ledge (see the note on canOccupy below).
+const GRAVITY = 30;
+const JUMP_SPEED = 8.3;
 
 // the highest surface under the player's footprint, in whole voxels
 function surfaceLevel(x: number, z: number): number {
@@ -96,6 +114,15 @@ export function createPlayer(): THREE.Group {
 
 const move = new THREE.Vector3();
 
+// Vertical state, kept beside walkTime and walkFrame for the same reason: there
+// is exactly one player and nothing else needs to read these.
+//
+// `grounded` is tracked rather than inferred from the current height, because
+// "is standing on the floor right now" and "was on the floor at the start of
+// this frame" are different questions and the jump needs the second one.
+let vy = 0;
+let grounded = true;
+
 export function updatePlayer(player: THREE.Group, dt: number): void {
   const input = getMoveInput();
   const moving = input.x !== 0 || input.y !== 0;
@@ -120,7 +147,15 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
       if (treeBlocks(x, z, FOOT_R)) return false;
       const targetY = surfaceLevel(x, z) * VOXEL;
       if (SEA_Y - targetY > STOP_DEPTH) return false; // too deep to wade
-      return targetY - y <= MAX_STEP; // too tall a step to climb
+      // Too tall a step to climb, measured against the CURRENT height rather
+      // than the ground - so being part-way up a jump counts. This is what
+      // makes a jump worth having: at the 1.15-block apex the gap to a 2-block
+      // ledge is under MAX_STEP, so a jump carries the player up onto one,
+      // and the same test is what stops them walking off a 3-block cliff face
+      // into the air. Note the ordering in updatePlayer: the horizontal move
+      // is resolved BEFORE gravity runs, using last frame's height, which is
+      // one frame of lag on the climb and is well under a pixel of it.
+      return targetY - y <= MAX_STEP;
     };
 
     if (canOccupy(nx, nz, fromY)) {
@@ -160,8 +195,37 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
   ud.armL.rotation.x = -swing * 0.8;
   ud.armR.rotation.x = swing * 0.8;
 
-  // stand exactly on the voxel surface; feet never land between cubes
+  // ------------------------------------------------------------------ vertical
+  // Real gravity, replacing the old "lerp toward the ground" that pulled the
+  // feet down onto the surface every frame. That was fine while y could only
+  // ever be the ground height, but it cannot express a jump: it would have
+  // dragged the player straight back down the instant they left the floor. With
+  // an actual velocity, walking off a ledge is a fall and a jump is an arc,
+  // both for free.
   const groundY = surfaceLevel(player.position.x, player.position.z) * VOXEL;
-  player.position.y += (groundY - player.position.y) * Math.min(1, dt * 18);
-  if (Math.abs(groundY - player.position.y) < 0.02) player.position.y = groundY;
+
+  // Jump while the key is held, gated only on being back on the ground. Read
+  // as a level rather than an edge, so holding Space bounces the player: the
+  // hop goes up, the landing sets `grounded`, and the very next frame starts
+  // the next one. There is no cooldown and no minimum gap between hops, which
+  // is safe precisely because the gate is `grounded` - the fastest this can
+  // repeat is one jump per landing, which is the 0.55s arc, and not the
+  // keyboard's auto-repeat rate.
+  if (isJumpHeld() && grounded) {
+    vy = JUMP_SPEED;
+    grounded = false;
+  }
+
+  vy -= GRAVITY * dt;
+  player.position.y += vy * dt;
+
+  if (player.position.y <= groundY) {
+    // Landed. Snapped exactly onto the surface rather than left wherever the
+    // integration happened to overshoot, so the feet never come to rest a
+    // fraction inside a block - which would show up as the coordinate readout
+    // sitting one lower than the block visibly underfoot.
+    player.position.y = groundY;
+    vy = 0;
+    grounded = true;
+  }
 }
