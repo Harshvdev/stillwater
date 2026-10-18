@@ -164,3 +164,37 @@ export function updateCamera(cam: THREE.OrthographicCamera, target: THREE.Vector
 export function resizeCamera(cam: THREE.OrthographicCamera): void {
   applyFrustum(cam);
 }
+
+const _rel = new THREE.Vector3();
+
+/**
+ * Nudge a moving object so that it lands on whole pixels ON SCREEN.
+ *
+ * The camera snap above keeps the world still, but it moves the rig in 1px
+ * jumps while a walking player only covers ~0.24px per frame - roughly a
+ * quarter of a pixel. Left alone, the player slides forward smoothly between
+ * camera jumps and is then thrown backwards by whatever the camera snapped, so
+ * it visibly sawtooths against the ground it is standing on. Both are on the
+ * pixel grid individually; they are simply not on the SAME grid.
+ *
+ * This moves the object by whatever sub-pixel remainder it has, so it shares
+ * the camera's grid and steps with the world rather than against it.
+ *
+ * `object` must be a holder whose parent is the scene root at the origin, and
+ * `worldPos` the object's logical position. Only the render offset is touched,
+ * so gameplay coordinates stay exact and sub-pixel - collision, the camera
+ * target and the shadow-caster bounds are all unaffected. It deliberately does
+ * not correct depth, which an orthographic camera cannot show.
+ */
+export function snapToPixelGrid(
+  cam: THREE.OrthographicCamera, object: THREE.Object3D, worldPos: THREE.Vector3
+): void {
+  const wpp = frustum / renderH;
+  _rel.copy(worldPos).sub(cam.position);
+  const fx = _rel.dot(SR) / wpp;
+  const fy = _rel.dot(SU) / wpp;
+  object.position
+    .set(0, 0, 0)
+    .addScaledVector(SR, -(fx - Math.round(fx)) * wpp)
+    .addScaledVector(SU, -(fy - Math.round(fy)) * wpp);
+}

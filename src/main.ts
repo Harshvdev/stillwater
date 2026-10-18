@@ -9,7 +9,7 @@ import { createTrees, updateTreeFade, treeLocations } from './trees';
 import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
-import { createCamera, updateCamera, resizeCamera, setRenderSize } from './camera';
+import { createCamera, updateCamera, resizeCamera, setRenderSize, snapToPixelGrid } from './camera';
 import { createSky, SUN_DISTANCE } from './sky';
 import {
   dayState, advanceDayNight, getHour, setHour, isRunning, setRunning,
@@ -373,6 +373,15 @@ function main(): void {
   });
   scene.add(player);
 
+  // The player hangs off a holder group at the origin, so the pixel-grid snap
+  // can be applied as a RENDER offset on the holder while `player` itself
+  // keeps its exact sub-pixel gameplay position. Writing the snapped value into
+  // player.position instead would feed the snap's own error back into the next
+  // frame's movement and collision tests, and the player would drift.
+  const playerHolder = new THREE.Group();
+  playerHolder.add(player);
+  scene.add(playerHolder);
+
   const sand = createSandDeform();
 
   initInput();
@@ -440,6 +449,9 @@ function main(): void {
     sand.update(dt, player.position);
     updateWater(t);
     updateCamera(camera, player.position);
+    // after the camera has settled, so the player is snapped to the same grid
+    // the camera just landed on and steps with the world instead of against it
+    snapToPixelGrid(camera, playerHolder, player.position);
     // fade anything standing between the camera and the player, after the
     // camera has settled on its new position
     updateTreeFade(player.position);
@@ -457,6 +469,12 @@ function main(): void {
     __three: { renderer, scene, camera, composer, bloom, sun, moon, hemi },
     __updateWater: updateWater,
     __player: player,
+    // one camera step against the live player, so the on-screen follow path can
+    // be measured exactly without depending on rAF timing
+    __updateCamera: (): void => {
+      updateCamera(camera, player.position);
+      snapToPixelGrid(camera, playerHolder, player.position);
+    },
     // jump the clock without waiting for it: park the cycle, set an hour
     __setHour: (h: number): void => {
       setRunning(false);
