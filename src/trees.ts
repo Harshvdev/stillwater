@@ -246,10 +246,30 @@ export function createTrees(): THREE.Group {
   // instanced meshes were always separate.
   //
   // Both carry `fade` for the per-instance occlusion dither.
-  const barkMat = voxelMaterial({ fade: true, tex: 'bark' });
+  //
+  // Both also carry `wind`, and that is the point: the trunk has to sway with
+  // its canopy or the leaves ring around it and slide off a stationary log,
+  // opening a gap that shows the bare trunk. Sharing `aTree` (the trunk axis and
+  // ground height) is what makes the two move as one body.
+  const barkMat = voxelMaterial({ fade: true, tex: 'bark', wind: true });
   const leafMat = voxelMaterial({ fade: true, tex: 'leaf', wind: true });
 
-  const trunk = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), barkMat, MAX_TREES);
+  // The wind shader ramps a trunk's sway in with height, reaching full
+  // displacement exactly where the canopy starts, so the bare trunk bends over
+  // from a planted base and meets the canopy without a seam.
+  //
+  // That only works if the trunk actually has vertices down there. A plain box
+  // carries just two rows - base and top - so the rendered surface between them
+  // is a straight line reaching only 0.657 of the canopy's displacement where the
+  // canopy has all of it, and the trunk visibly slides out from under its own
+  // leaves. Sixteen rows puts a vertex within 0.2% of the canopy line. The cost is
+  // a few dozen vertices on one SHARED geometry, not per tree: the mesh is
+  // instanced.
+  const TRUNK_SEGMENTS = 16;
+
+  const trunk = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1, 1, TRUNK_SEGMENTS, 1), barkMat, MAX_TREES
+  );
   const leaves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), leafMat, MAX_LEAVES);
   trunk.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_TREES * 3), 3);
   leaves.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_LEAVES * 3), 3);
@@ -268,6 +288,13 @@ export function createTrees(): THREE.Group {
   leaves.geometry.setAttribute('aTop', leavesTop);
   trunk.geometry.setAttribute('aFade', trunkFade);
   leaves.geometry.setAttribute('aFade', leafFade);
+  // (trunkX, groundY, trunkZ, bareTrunkHeight), identical for every cube of one
+  // tree. The wind shader reads this instead of the cube's own position, so a
+  // canopy translates as a unit and never shears apart from its trunk.
+  const trunkTree = new THREE.InstancedBufferAttribute(new Float32Array(MAX_TREES * 4), 4);
+  const leafTree = new THREE.InstancedBufferAttribute(new Float32Array(MAX_LEAVES * 4), 4);
+  trunk.geometry.setAttribute('aTree', trunkTree);
+  leaves.geometry.setAttribute('aTree', leafTree);
   trunk.frustumCulled = false;
   leaves.frustumCulled = false;
 
@@ -326,6 +353,8 @@ export function createTrees(): THREE.Group {
         c.setHex(hex, THREE.SRGBColorSpace);
         leaves.setColorAt(nLeaf, c);
         leavesTop.setXYZ(nLeaf, c.r, c.g, c.b);
+        // every leaf cube of this tree gets the same wind anchor as its trunk
+        leafTree.setXYZW(nLeaf, x, groundY, z, TRUNK_VISIBLE);
         nLeaf++;
       };
 
@@ -336,6 +365,7 @@ export function createTrees(): THREE.Group {
       c.setHex(bark, THREE.SRGBColorSpace);
       trunk.setColorAt(n, c);
       trunkTop.setXYZ(n, c.r, c.g, c.b);
+      trunkTree.setXYZW(n, x, groundY, z, TRUNK_VISIBLE);
 
       // record the trunk's footprint for the player's collision
       trunkCells.set(j * GRID + i, trunkH);
@@ -373,6 +403,8 @@ export function createTrees(): THREE.Group {
   leaves.instanceColor!.needsUpdate = true;
   trunkTop.needsUpdate = true;
   leavesTop.needsUpdate = true;
+  trunkTree.needsUpdate = true;
+  leafTree.needsUpdate = true;
 
   // hand the meshes to the fade pass
   trunkMesh = trunk;

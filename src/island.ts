@@ -277,7 +277,7 @@ ${bands ? 'attribute float aBandTop;\nvarying float vBandTop;\nvarying float vWo
 ${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}
 ${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}
 ${tex ? 'varying vec3 vWorldPos;\nvarying vec3 vTexNormal;' : ''}
-${wind ? 'uniform float uWindTime;\nuniform vec2 uWindDir;\nuniform float uWindStrength;' : ''}`
+${wind ? 'uniform float uWindTime;\nuniform vec2 uWindDir;\nuniform float uWindStrength;\nattribute vec4 aTree;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
@@ -308,12 +308,31 @@ vTexNormal = normal;`
 	mvPosition = instanceMatrix * mvPosition;
 #endif
   vec3 wPos = (modelMatrix * mvPosition).xyz;
-  float leafWave = sin(wPos.x * 0.4 + wPos.z * 0.4 - uWindTime * 2.5) * 0.7
-                 + sin(wPos.x * 0.9 - wPos.z * 0.8 - uWindTime * 4.0) * 0.3;
-  float leafGust = 0.7 + 0.3 * sin(uWindTime * 0.85 + wPos.x * 0.05);
-  vec2 leafShift = uWindDir * (leafWave * leafGust * uWindStrength * 0.08);
-  mvPosition.x += leafShift.x;
-  mvPosition.z += leafShift.y;
+
+  // A tree sways as ONE rigid body, driven by its own axis rather than by each
+  // cube's own position. Deriving the wave from wPos gave every cube in a canopy
+  // a different displacement, so the canopy writhed instead of swaying - and
+  // because layers 1 and 2 leave the trunk's own cell empty, the cubes ringing
+  // the trunk slid away from a trunk that has no wind shader at all and never
+  // moved. That opened a gap which showed the bare log through the leaves, and
+  // it grew with zoom: at the closest zoom the gap is several pixels.
+  //
+  // aTree is (trunkX, groundY, trunkZ, bareTrunkHeight), identical for every
+  // cube of one tree, so the whole tree receives the same displacement.
+  float treeWave = sin(aTree.x * 0.4 + aTree.z * 0.4 - uWindTime * 2.5) * 0.7
+                 + sin(aTree.x * 0.9 - aTree.z * 0.8 - uWindTime * 4.0) * 0.3;
+  float treeGust = 0.7 + 0.3 * sin(uWindTime * 0.85 + aTree.x * 0.05);
+
+  // Ramp the sway in with height so the trunk bends instead of sliding: the
+  // base stays planted on the ground and the top reaches full displacement,
+  // which is exactly where the canopy sits. Without this the whole trunk would
+  // skate sideways and tear a sliver of ground open at its foot.
+  float treeBend = clamp((wPos.y - aTree.y) / max(aTree.w, 0.0001), 0.0, 1.0);
+  treeBend = treeBend * treeBend * (3.0 - 2.0 * treeBend);
+
+  vec2 treeShift = uWindDir * (treeWave * treeGust * uWindStrength * 0.08 * treeBend);
+  mvPosition.x += treeShift.x;
+  mvPosition.z += treeShift.y;
 mvPosition = modelViewMatrix * mvPosition;
 gl_Position = projectionMatrix * mvPosition;`
       );
