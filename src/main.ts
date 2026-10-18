@@ -42,6 +42,18 @@ function main(): void {
   // narrow scene.fog back out of its `| null`
   const fog = scene.fog as THREE.Fog;
 
+  // The buffer size has to be known BEFORE the camera is built, not after: the
+  // ortho frustum's horizontal extent is derived from it, and camera.ts snaps
+  // the rig using a single world-per-pixel that is only valid when the buffer's
+  // pixels are square. Constructing the camera first left it at aspect 1/1 -
+  // so a buffer 441x184 was being stretched to a 44x44-unit square, making every
+  // pixel 0.0998 units wide against 0.2391 tall. Non-square pixels are exactly
+  // the shimmer this is meant to prevent, so the order matters.
+  setRenderSize(
+    Math.max(1, Math.floor(window.innerWidth / SCALE)),
+    Math.max(1, Math.floor(window.innerHeight / SCALE))
+  );
+
   const camera = createCamera();
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setPixelRatio(1);
@@ -64,10 +76,25 @@ function main(): void {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
 
+  // The backing store is the window divided by SCALE, floored. That floor is
+  // what makes the upscale non-integer: a 1324px window at SCALE 3 gives 441
+  // texels, and the browser then stretches those 441 to 1324 CSS px - a factor
+  // of 3.0023. Under `image-rendering: pixelated` that factor is uneven, so
+  // alternate source pixels land on 3 and 4 device pixels and the grid itself
+  // beats against itself, independently of anything the renderer does.
+  //
+  // So the canvas is sized in whole SCALE blocks explicitly (updateStyle false,
+  // then our own width/height) rather than left to fill the window. The cost is
+  // up to SCALE-1 unused px on each axis, which is invisible, and the gain is
+  // that every rendered texel covers exactly SCALE device pixels - which is
+  // also the assumption camera.ts's world-per-pixel snap is built on.
   const fit = (): void => {
     const w = Math.max(1, Math.floor(window.innerWidth / SCALE));
     const h = Math.max(1, Math.floor(window.innerHeight / SCALE));
     renderer.setSize(w, h, false);
+    const el = renderer.domElement;
+    el.style.width = `${w * SCALE}px`;
+    el.style.height = `${h * SCALE}px`;
     setRenderSize(w, h);
   };
   fit();

@@ -9,10 +9,32 @@ let targetFrustum = 44;
 let renderW = 1;
 let renderH = 1;
 
-// camera basis for the fixed (30, 30, 30) iso offset: screen right and
-// screen "up the screen", used to snap position in screen space
-const RIGHT = new THREE.Vector3(1, 0, -1).normalize();
-const BACK = new THREE.Vector3(1, 0, 1).normalize();
+// The rig's own basis in world space. The camera sits at +30,+30,+30 relative
+// to its target and looks back along (-1,-1,-1), so these are exactly three's
+// camera axes:
+//
+//   screen right  = ( 1, 0,-1) / sqrt(2)
+//   screen up     = (-1, 2,-1) / sqrt(6)
+//   camera +z     = ( 1, 1, 1) / sqrt(3)
+//
+// The snap has to be done in THIS basis. It used to be done along two
+// horizontal world axes, RIGHT (1,0,-1) and BACK (1,0,1), on the assumption
+// those were the screen axes. The first one is; the second is not - the real
+// screen-up axis is (-1,2,-1)/sqrt(6), which carries a Y component that no
+// horizontal direction can reach. So the old snap constrained x and z only and
+// let the vertical screen position ride through untouched.
+//
+// Worse, it snapped the offset from the *target*, which is near-constant once
+// the lerp has settled. Quantising a constant to a constant cancels nothing,
+// so the camera still slid a fraction of a pixel per frame and every edge in
+// the frame crawled while walking. Standing still hid it, because a stationary
+// image cannot shimmer.
+const SR = new THREE.Vector3(1, 0, -1).normalize();
+const SU = new THREE.Vector3(-1, 2, -1).normalize();
+// The third axis. Depth along it is the one component an orthographic camera
+// cannot show - sliding the rig along it moves nothing on screen - so it is
+// left unsnapped on purpose, which keeps the rig at its intended distance.
+const SD = new THREE.Vector3(1, 1, 1).normalize();
 
 // The iso rig is this fixed offset on all three axes, and it rides the target's
 // height as well as its ground position.
@@ -46,7 +68,11 @@ export function setRenderSize(w: number, h: number): void {
 }
 
 export function createCamera(): THREE.OrthographicCamera {
-  const aspect = window.innerWidth / window.innerHeight;
+  // the buffer's aspect, not the window's: the two differ whenever the window
+  // size is not an exact multiple of SCALE, and using the window's here would
+  // stretch the projection to fit a buffer that is a fraction of a pixel
+  // narrower than the window, which desynchronises the pixel grid below
+  const aspect = renderW / renderH;
   const cam = new THREE.OrthographicCamera(
     (-frustum * aspect) / 2, (frustum * aspect) / 2, frustum / 2, -frustum / 2, 0.1, 600
   );
@@ -64,7 +90,7 @@ export function createCamera(): THREE.OrthographicCamera {
 }
 
 function applyFrustum(cam: THREE.OrthographicCamera): void {
-  const aspect = window.innerWidth / window.innerHeight;
+  const aspect = renderW / renderH;
   cam.left = (-frustum * aspect) / 2;
   cam.right = (frustum * aspect) / 2;
   cam.top = frustum / 2;
@@ -86,21 +112,42 @@ export function updateCamera(cam: THREE.OrthographicCamera, target: THREE.Vector
   frustum = Math.round(frustum * 4) / 4;
   applyFrustum(cam);
 
-  // snap the offset from the follow target to whole rendered pixels in screen
-  // space; the iso view direction is fixed, so this is a pure translation and
-  // the pixel grid never shimmers as the camera pans
+  // Snap the rig to whole rendered pixels IN SCREEN SPACE, and snap the camera
+  // position itself rather than its offset from the target. Snapping the offset
+  // was the original bug: the offset settles to a constant, so quantising it
+  // does nothing and the player-driven translation underneath it stays
+  // sub-pixel.
+  //
+  // One wpp covers both axes. It has to: the horizontal extent is
+  // frustum*aspect over renderW pixels and the vertical is frustum over
+  // renderH, and with aspect = renderW/renderH both reduce to frustum/renderH.
+  // Using the window's aspect here (as this used to) made the two differ, so a
+  // single wpp could not have been correct on both axes at once.
   const wpp = frustum / renderH;
-  const rel = cam.position.clone().sub(anchor);
-  const u = Math.round(rel.dot(RIGHT) / wpp) * wpp;
-  const v = Math.round(rel.dot(BACK) / wpp) * wpp;
-  cam.position.copy(anchor).addScaledVector(RIGHT, u).addScaledVector(BACK, v);
-  // RIGHT and BACK are both horizontal, so the snap can only correct x and z.
-  // `copy(anchor)` has just overwritten y with the aim height though, which
-  // silently drops the vertical ISO_OFFSET that `desired` put there - the camera
-  // ends up level with the player and the iso view collapses to a top-down
-  // angle. The vertical offset is exact and never needed snapping to the pixel
-  // grid, so it is simply added back.
-  cam.position.y += ISO_OFFSET;
+
+  // Decompose the settled position into the rig's screen basis...
+  //
+  // Snapped against the WORLD, not against the follow target. The world is
+  // static, so pinning the camera to the world's pixel grid is what holds every
+  // terrain edge rock still; anchoring the grid to the moving target instead
+  // would let the whole scene creep a fraction of a pixel per frame, which is
+  // the original shimmer all over again.
+  //
+  // The player's own pixel snap (snapToPixelGrid) uses this same world grid,
+  // which is what keeps the two consistent - see the note there.
+  const u = Math.round(cam.position.dot(SR) / wpp) * wpp;
+  const v = Math.round(cam.position.dot(SU) / wpp) * wpp;
+  // ...and leave depth alone: orthographic projection cannot show it, so
+  // snapping it would only add jitter to the rig's distance for no gain.
+  const depth = cam.position.dot(SD);
+
+  // Rebuild from the snapped pair. SR/SU/SD are orthonormal, so this is an exact
+  // round trip on the unsnapped position and a pure translation once snapped.
+  cam.position
+    .set(0, 0, 0)
+    .addScaledVector(SR, u)
+    .addScaledVector(SU, v)
+    .addScaledVector(SD, depth);
 
   // Derived from the snapped position rather than aimed at the target directly.
   // Both give the target at frame centre, but this one keeps the view
