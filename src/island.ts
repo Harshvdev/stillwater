@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { COAST_RADII, COAST_SAMPLES } from './coast';
 import { PALETTE, pick } from './palette';
 import { blockTexture, grassMask } from './textures';
+import { applyCloudShadows } from './clouds';
 import { windUniforms } from './wind';
 
 // ---------------------------------------------------------------- coast port
@@ -224,6 +225,7 @@ export function voxelMaterial(opts: {
   rough?: number; metal?: number; wind?: boolean;
 } = {}): THREE.MeshStandardMaterial {
   const bands = opts.bands === true;
+
   const outline = opts.outline === true;
   const fade = opts.fade === true;
   const wind = opts.wind === true;
@@ -474,7 +476,12 @@ ${fade ? `// Per-instance occlusion fade, as an ordered screen-door dither rathe
 if (vFade < bayer4(gl_FragCoord.xy)) discard;` : ''}`
       );
   };
-  return mat;
+
+  // Cloud shadows on every voxel surface. Applied here rather than at each call
+  // site because this is the single material factory for the terrain, trees,
+  // grass and the water voxels - one call covers all of them, and a new surface
+  // added later cannot forget. See clouds.ts.
+  return applyCloudShadows(mat);
 }
 
 export interface SandColumn {

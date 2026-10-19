@@ -5,9 +5,12 @@ import {
 // TEMPORARY - day/night test controls.
 //
 // This whole file is scaffolding for looking at the cycle, not part of the
-// game. To remove it: delete this file, plus the three lines in main.ts that
-// name it (the import, `initDaySlider()` and `syncDaySlider()`). Nothing else
-// reads from here, and the cycle runs off its own clock either way.
+// game. To remove it: delete this file plus src/cloudSlider.ts and
+// src/sidebar.ts, and the lines in main.ts that name them. Nothing else reads
+// from here, and the cycle runs off its own clock either way.
+//
+// It now renders INTO the shared sidebar rather than making its own floating
+// panel - see sidebar.ts. The CSS moved there too; this file only builds markup.
 
 // The slider works in minutes so a stop is one step of the track and the
 // readout can show a real clock time; daynight.ts thinks in hours.
@@ -45,54 +48,7 @@ function phaseName(h: number): string {
 
 const speedLabel = (s: number): string => `${Math.round(s / 60)} min/day`;
 
-export function initDaySlider(): void {
-  const style = document.createElement('style');
-  style.textContent = `
-    #daypanel {
-      position: fixed; left: 10px; bottom: 10px; z-index: 10;
-      background: rgba(8, 12, 20, 0.72);
-      border: 2px solid #2f4a63;
-      color: #cfe0ea;
-      font: 11px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-      padding: 8px 10px 9px;
-      min-width: 232px;
-      user-select: none;
-    }
-    #daypanel .row { display: flex; align-items: center; gap: 6px; }
-    #daypanel .head {
-      display: flex; justify-content: space-between; gap: 10px;
-      color: #7fa8c4; letter-spacing: 0.08em; text-transform: uppercase;
-    }
-    #daypanel .big { color: #ffd98a; font-size: 13px; }
-    #daypanel .phase { color: #8fd0c8; margin-bottom: 2px; }
-    #daypanel .dim { color: #7fa8c4; }
-    #daypanel label { white-space: nowrap; }
-    #daypanel input[type=range] {
-      -webkit-appearance: none; appearance: none;
-      flex: 1; height: 14px; background: transparent; margin: 0; cursor: ew-resize;
-    }
-    #daypanel input[type=range]::-webkit-slider-runnable-track {
-      height: 4px; background: #1b2c3e; border: 1px solid #3a5670;
-    }
-    #daypanel input[type=range]::-moz-range-track {
-      height: 4px; background: #1b2c3e; border: 1px solid #3a5670;
-    }
-    #daypanel input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none; appearance: none;
-      width: 9px; height: 14px; margin-top: -6px;
-      background: #ffd98a; border: 1px solid #6b4f16;
-    }
-    #daypanel input[type=range]::-moz-range-thumb {
-      width: 9px; height: 14px; border-radius: 0;
-      background: #ffd98a; border: 1px solid #6b4f16;
-    }
-    #daypanel input[type=checkbox] { accent-color: #ffd98a; margin: 0; }
-    #daypanel .note { color: #4f6f88; margin-top: 3px; }
-  `;
-  document.head.appendChild(style);
-
-  const panel = document.createElement('div');
-  panel.id = 'daypanel';
+export function initDaySlider(panel: HTMLElement): void {
   panel.innerHTML = `
     <div class="head"><span>time of day</span><span class="big"></span></div>
     <div class="phase"></div>
@@ -102,9 +58,7 @@ export function initDaySlider(): void {
       <span style="flex:1"></span><span class="dim"></span>
     </div>
     <div class="row"><input type="range" min="30" max="1200" step="10" value="${getCycleLength()}"></div>
-    <div class="note">temp debug ui</div>
   `;
-  document.body.appendChild(panel);
 
   clockText = panel.querySelector('.big') as HTMLElement;
   phaseText = panel.querySelector('.phase') as HTMLElement;

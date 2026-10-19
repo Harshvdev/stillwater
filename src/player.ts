@@ -3,6 +3,7 @@ import { VOXEL, SEA_Y, levelAtWorld } from './island';
 import { getMoveInput, isJumpHeld } from './input';
 import { treeBlocks } from './trees';
 import { PALETTE } from './palette';
+import { applyCloudShadows } from './clouds';
 
 const SPEED = 6;
 // a voxel of water is wadeable, two is not - the same "stop at the waterline"
@@ -58,7 +59,11 @@ function part(w: number, h: number, d: number, color: number, x: number, y: numb
   // specular dot that the matte terrain never has.
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 })
+    // Cloud shadows reach the figure too. This is the one place it really
+    // matters: the player is the only thing in the frame that is definitely
+    // "right now", so having a cloud shadow pass over them and the ground
+    // under them at the same moment is what ties the two together.
+    applyCloudShadows(new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 }))
   );
   m.position.set(x, y, z);
   return m;

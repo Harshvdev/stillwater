@@ -15,11 +15,15 @@ import {
   dayState, advanceDayNight, getHour, setHour, isRunning, setRunning,
   getCycleLength, setCycleLength,
 } from './daynight';
-// TEMPORARY: the day/night test panel. Delete src/daySlider.ts and the three
-// lines naming it (this import, `initDaySlider()` and `syncDaySlider()`) to
-// remove it; nothing else reads from it.
+// TEMPORARY: the shared debug sidebar hosting the day/night and cloud controls.
+// Delete sidebar.ts, daySlider.ts and cloudSlider.ts, plus the three imports
+// below and the init/sync calls in main(), to remove all of it; nothing else
+// reads from any of them.
+import { initSidebar } from './sidebar';
 import { initDaySlider, syncDaySlider } from './daySlider';
+import { initCloudSlider, syncCloudSlider } from './cloudSlider';
 import { updateWind } from './wind';
+import { updateClouds, cloudUniforms } from './clouds';
 import { initCoordinates, syncCoordinates } from './coordinates';
 import { createFallingLeaves, updateFallingLeaves } from './fallingLeaves';
 
@@ -391,8 +395,10 @@ function main(): void {
   const sand = createSandDeform();
 
   initInput();
-  // TEMPORARY: builds the panel. See the import at the top.
-  initDaySlider();
+  // TEMPORARY: builds the debug sidebar. See the imports at the top.
+  const sb = initSidebar();
+  initDaySlider(sb.sections.day);
+  initCloudSlider(sb.sections.cloud);
   initCoordinates();
 
   /**
@@ -445,9 +451,15 @@ function main(): void {
     advanceDayNight(dt);
     updateLights();
     updateWind(dt, t);
+    // After updateLights and updateWind: the deck samples the key direction
+    // that updateLights just resolved, and drifts along the wind vector
+    // updateWind just rotated.
+    updateClouds(dt, t, Math.max(sun.intensity, moon.intensity));
     updateFallingLeaves(dt, t);
-    // TEMPORARY: keeps the panel reading the live hour. See the import above.
+    // TEMPORARY: keeps the debug sidebar reading live state. See the imports
+    // above.
     syncDaySlider();
+    syncCloudSlider();
     updatePlayer(player, dt);
     // after the player has moved, so the readout is this frame's position
     syncCoordinates(player.position);
@@ -469,6 +481,7 @@ function main(): void {
     __seaY: SEA_Y,
     __groundHeight: (x: number, z: number) => levelAtWorld(x, z) * VOXEL,
     __three: { renderer, scene, camera, composer, bloom, sun, moon, hemi },
+    __clouds: cloudUniforms,
     __updateWater: updateWater,
     __player: player,
     // one camera step against the live player, so the on-screen follow path can
@@ -494,6 +507,7 @@ function main(): void {
       advanceDayNight(dt);
       updateLights();
       updateWind(dt, t);
+      updateClouds(dt, t, Math.max(sun.intensity, moon.intensity));
       updateFallingLeaves(dt, t);
       updatePlayer(player, dt);
       sand.update(dt, player.position);

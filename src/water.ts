@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VOXEL, SEA_Y, voxelMaterial, levelAtWorld } from './island';
 import { PALETTE } from './palette';
+import { applyCloudShadows } from './clouds';
 import { dayState } from './daynight';
 
 // voxel sea: one column per water cell, stretched from the seabed up to the
@@ -236,11 +237,16 @@ export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } 
   // the sky fill grade it, so it recedes into the fog the way the shallows do.
   const ocean = new THREE.Mesh(
     new THREE.PlaneGeometry(700, 700),
-    new THREE.MeshStandardMaterial({
+    // Cloud shadows reach the open sea too. Without this the near water is
+    // shaded by passing clouds and the far ocean past the voxel grid is not,
+    // and the boundary between them is exactly where the pattern appears to
+    // stop - which reads as the edge of the effect rather than as the edge of
+    // the water.
+    applyCloudShadows(new THREE.MeshStandardMaterial({
       color: PALETTE.water[0],
       roughness: 0.2,
       metalness: 0,
-    })
+    }))
   );
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = SEA_Y - 0.05;
