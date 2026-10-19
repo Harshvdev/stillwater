@@ -4,13 +4,27 @@ import * as THREE from 'three';
 //
 // Everything time-of-day lives here and everything else reads it from
 // `dayState`:
-//   sky.ts   - dome colours, sun/moon direction and discs, stars
-//   main.ts  - the key + fill lights, and the fog colour
+//   main.ts  - the key + fill lights
 //   water.ts - the glitter path's axis and how hard the sea sparkles
 //
 // The module is deliberately the only place in the game that knows what time it
 // is. Everything downstream treats the cycle as a set of already-solved values,
 // which is why none of them has to re-derive anything about the sun.
+//
+// There is no sky here, and there is not meant to be. The camera is
+// orthographic and locked to a (-1,-1,-1) view direction, so the projection
+// never puts a horizon on screen and the top of the frame is always sea. A
+// sky dome was measured to contribute exactly zero pixels at every hour and
+// every zoom the player can reach, and scene.fog the same - the deepest visible
+// point is ~102 units against a fog near of 120. Both were removed rather than
+// tuned, because in a view with no horizon there is nothing for either to do:
+// no aerial perspective is possible, so depth has to come from geometry and
+// cast shadow alone.
+//
+// That is why this module is now only LIGHTS. The sun and moon still ride real
+// arcs, because the shadows and the glitter path need genuine directions to
+// stay consistent with each other - but nothing here describes a sky, because
+// no sky is ever drawn.
 //
 // Two halves, and they are different kinds of number:
 //
@@ -50,9 +64,8 @@ const MOON_ELEV = 0.62; // 35.5 deg at midnight: a little lower, it reads as fur
 // AZIMUTH.
 //
 // Noon keeps the authored 135 degrees, i.e. sun horizontal (-1, 0, +1) / sqrt2.
-// That is not a taste decision - sky.ts explains why: it is the azimuth whose
-// shadows sweep across an isometric frame instead of hiding behind their own
-// casters.
+// That is not a taste decision: it is the azimuth whose shadows sweep across an
+// isometric frame instead of hiding behind their own casters.
 //
 // The sweep is what makes it a cycle rather than a slider. At 6am and 6pm the
 // elevation crosses zero, and to get there the azimuth has to rotate through
@@ -87,8 +100,7 @@ const moonAngle = (h: number): number => TAU * (h / 24); // 0 at midnight
 //
 // Every ramp the cycle drives, sampled at the hours where it actually turns.
 //
-// The noon row is the shipped scene: the same zenith, horizon and sun tint as
-// the old sky.ts constants, and the same 3.78 / 1.73 light intensities and
+// The noon row is the shipped scene: the same 3.78 / 1.73 light intensities and
 // 0xfff2dc / 0xdcefff / 0xc9a87e colours that main.ts's budget was solved
 // against. Anything that reaches it by interpolation lands on the scene as it
 // was.
@@ -100,15 +112,6 @@ const moonAngle = (h: number): number => TAU * (h / 24); // 0 at midnight
 
 interface Stop {
   h: number;
-  zenith: number;
-  horizon: number;
-  sunTint: number;
-  /** warm haze around the sun: 1 is the noon haze, 0 is none */
-  haloK: number;
-  /** warm band along the horizon on the sun's side of the dome */
-  horizonGlow: number;
-  /** 0 = daylight, 1 = full starfield */
-  stars: number;
   sunCol: number;
   sunI: number;
   moonCol: number;
@@ -123,7 +126,7 @@ interface Stop {
 // The fields that interpolate as plain numbers. The rest are colours and go
 // through mixHex, because lerping a hex int would interpolate the *encoding*
 // rather than the colour.
-type ScalarKey = 'haloK' | 'horizonGlow' | 'stars' | 'sunI' | 'moonI' | 'hemiI' | 'glint';
+type ScalarKey = 'sunI' | 'moonI' | 'hemiI' | 'glint';
 
 // Ordered by hour, and it has to cover the whole 24: the last row is hour 24,
 // which is hour 0 again, so the wrap needs no special case. Hours are placed
@@ -131,12 +134,11 @@ type ScalarKey = 'haloK' | 'horizonGlow' | 'stars' | 'sunI' | 'moonI' | 'hemiI' 
 // at 6 and 18 exactly, so that is where the sunrise and sunset rows sit.
 const STOPS: readonly Stop[] = [
   {
-    // deep night. The zenith is not black: pure black against bloom's threshold
-    // has no headroom, and a hint of blue is what keeps it reading as night sky
-    // rather than as a hole in the render.
+    // deep night. Lit only by the moon, with a cold blue fill standing in for
+    // skylight. The fill is well above zero at midnight on purpose: a night
+    // frame still has to read as land rather than as an unlit hole, and the
+    // hemisphere is the only thing that keeps the terrain's silhouette.
     h: 0,
-    zenith: 0x04081a, horizon: 0x0b1228, sunTint: 0x2b3a63,
-    haloK: 0.1, horizonGlow: 0, stars: 1,
     sunCol: 0xffd9a8, sunI: 0,
     moonCol: 0x8aa4dc, moonI: 0.55,
     hemiSky: 0x2f5590, hemiGround: 0x0a0f1e, hemiI: 1.3,
@@ -145,8 +147,6 @@ const STOPS: readonly Stop[] = [
   {
     // last of the dark, moon still up
     h: 4.5,
-    zenith: 0x071029, horizon: 0x1b2445, sunTint: 0x3a4a76,
-    haloK: 0.1, horizonGlow: 0, stars: 1,
     sunCol: 0xffd9a8, sunI: 0,
     moonCol: 0x8aa4dc, moonI: 0.5,
     hemiSky: 0x2f5590, hemiGround: 0x0a0f1e, hemiI: 1.25,
@@ -154,20 +154,19 @@ const STOPS: readonly Stop[] = [
   },
   {
     // first light: the sun is still ~5 deg under the horizon, so this is all
-    // sky. The warmth is the horizon glow, not the key.
+    // fill. The key is barely on and the sky term is still the cold blue of
+    // the night it is coming out of - the warmth arrives with the key.
     h: 5.6,
-    zenith: 0x14245c, horizon: 0x7a5570, sunTint: 0xff9a60,
-    haloK: 0.2, horizonGlow: 0.45, stars: 0.5,
     sunCol: 0xff8a4a, sunI: 0.12,
     moonCol: 0x8aa4dc, moonI: 0.25,
     hemiSky: 0x3a58a0, hemiGround: 0x1a1626, hemiI: 1.15,
     glint: 0.2,
   },
   {
-    // sunrise proper: the disc is on the horizon, the key is barely on
+    // sunrise proper: the key is barely on, and the fill has gone warm and
+    // bright under it. This is the stop that carries the transition, and it is
+    // carried almost entirely by hemiI rather than by sunI.
     h: 6.4,
-    zenith: 0x2b4a9c, horizon: 0xe09a63, sunTint: 0xffb070,
-    haloK: 0.55, horizonGlow: 0.55, stars: 0.12,
     sunCol: 0xff9c56, sunI: 1.0,
     moonCol: 0x8aa4dc, moonI: 0.1,
     hemiSky: 0x9fc0ec, hemiGround: 0xb8926e, hemiI: 1.35,
@@ -175,8 +174,6 @@ const STOPS: readonly Stop[] = [
   },
   {
     h: 8,
-    zenith: 0x2f6fc4, horizon: 0xc9ddec, sunTint: 0xffe9c0,
-    haloK: 0.45, horizonGlow: 0.12, stars: 0,
     sunCol: 0xfff0cc, sunI: 3.0,
     moonCol: 0x8aa4dc, moonI: 0,
     hemiSky: 0xd8ecff, hemiGround: 0xc9a87e, hemiI: 1.7,
@@ -186,8 +183,6 @@ const STOPS: readonly Stop[] = [
     // noon. The shipped look, exactly. See the budget in main.ts: sunlit sand
     // lands on 1.0 linear and a cast shadow on 0.42.
     h: 12,
-    zenith: 0x2f6fc4, horizon: 0xbfdcea, sunTint: 0xffe6b4,
-    haloK: 0.42, horizonGlow: 0, stars: 0,
     sunCol: 0xfff2dc, sunI: 3.78,
     moonCol: 0x8aa4dc, moonI: 0,
     hemiSky: 0xdcefff, hemiGround: 0xc9a87e, hemiI: 1.73,
@@ -196,8 +191,6 @@ const STOPS: readonly Stop[] = [
   {
     // the same height as 8am, so nearly the same row, a little warmer
     h: 16,
-    zenith: 0x2e6bc0, horizon: 0xcbdceb, sunTint: 0xffe4b4,
-    haloK: 0.45, horizonGlow: 0.14, stars: 0,
     sunCol: 0xfff0c8, sunI: 3.1,
     moonCol: 0x8aa4dc, moonI: 0,
     hemiSky: 0xd6e8fb, hemiGround: 0xc9a87e, hemiI: 1.7,
@@ -207,18 +200,14 @@ const STOPS: readonly Stop[] = [
     // golden: the sun is about 7 deg up, so the key is mostly grazing and the
     // whole scene has to be carried by the fill
     h: 17.6,
-    zenith: 0x2a5aa8, horizon: 0xe8c79a, sunTint: 0xffcf8c,
-    haloK: 0.8, horizonGlow: 0.35, stars: 0,
     sunCol: 0xffd9a0, sunI: 2.2,
     moonCol: 0x8aa4dc, moonI: 0,
     hemiSky: 0xbcd6f2, hemiGround: 0xbfa07c, hemiI: 1.5,
     glint: 0.85,
   },
   {
-    // the disc is on the horizon again, now going down
+    // the key is on its way down and the fill is following it, still warm
     h: 18.3,
-    zenith: 0x22459c, horizon: 0xe08a55, sunTint: 0xffa25c,
-    haloK: 0.9, horizonGlow: 0.6, stars: 0.05,
     sunCol: 0xff9a52, sunI: 0.7,
     moonCol: 0x8aa4dc, moonI: 0.12,
     hemiSky: 0xa8c4e8, hemiGround: 0xb08e70, hemiI: 1.2,
@@ -226,8 +215,6 @@ const STOPS: readonly Stop[] = [
   },
   {
     h: 19.6,
-    zenith: 0x12245c, horizon: 0x8a5a6e, sunTint: 0xd4704a,
-    haloK: 0.4, horizonGlow: 0.25, stars: 0.45,
     sunCol: 0xff8a4a, sunI: 0,
     moonCol: 0x8aa4dc, moonI: 0.2,
     hemiSky: 0x2f4a86, hemiGround: 0x141220, hemiI: 1.05,
@@ -235,8 +222,6 @@ const STOPS: readonly Stop[] = [
   },
   {
     h: 21,
-    zenith: 0x060c22, horizon: 0x121a34, sunTint: 0x3a4a76,
-    haloK: 0.12, horizonGlow: 0, stars: 0.95,
     sunCol: 0xffd9a8, sunI: 0,
     moonCol: 0x8aa4dc, moonI: 0.45,
     hemiSky: 0x2f5590, hemiGround: 0x0b1020, hemiI: 1.2,
@@ -245,8 +230,6 @@ const STOPS: readonly Stop[] = [
   {
     // hour 24 == hour 0, so the wrap is one straight interpolation
     h: 24,
-    zenith: 0x04081a, horizon: 0x0b1228, sunTint: 0x2b3a63,
-    haloK: 0.1, horizonGlow: 0, stars: 1,
     sunCol: 0xffd9a8, sunI: 0,
     moonCol: 0x8aa4dc, moonI: 0.55,
     hemiSky: 0x2f5590, hemiGround: 0x0a0f1e, hemiI: 1.3,
@@ -258,29 +241,19 @@ const STOPS: readonly Stop[] = [
 
 /**
  * The solved time of day. Colours are live objects, mutated in place, so the
- * sky material can bind its uniforms to them once and never be told again.
+ * lights can copy from them without any allocation per frame.
  */
 export const dayState = {
   /** time of day in hours, 0..24 */
   hour: 11,
-  /** direction to the sun. Below the horizon at night; the disc is hidden but
-   *  the vector stays valid, because the glitter axis is derived from it. */
+  /** direction to the sun. Below the horizon at night, but the vector stays
+   *  valid because the glitter axis is derived from it. */
   sunDir: new THREE.Vector3(),
   moonDir: new THREE.Vector3(),
   /** whichever of the two is currently the brighter key - this is the direction
    *  the sea's glitter path is computed from, so the reflection is under the
    *  light that is actually making it */
   keyDir: new THREE.Vector3(),
-
-  zenith: new THREE.Color(),
-  horizon: new THREE.Color(),
-  sunTint: new THREE.Color(),
-
-  /** warm haze around the sun's disc, 1 = the authored noon haze */
-  haloK: 1,
-  /** warm band along the horizon toward the sun's azimuth */
-  horizonGlow: 0,
-  stars: 0,
 
   sunColor: new THREE.Color(),
   sunIntensity: 0,
@@ -293,24 +266,7 @@ export const dayState = {
 
   /** 0..1: how much the sea glitters */
   glint: 1,
-
-  /** HDR disc colours, and how much of each is above the horizon */
-  sunDisc: new THREE.Color(),
-  sunDiscAmt: 0,
-  moonDisc: new THREE.Color(),
-  moonDiscAmt: 0,
 };
-
-// Two full turns of the disc: the sun's white at noon (4.0, 3.9, 3.5 - the
-// original sky.ts value, kept above the bloom threshold) down to a deep
-// horizon orange, and the moon's much cooler and slightly dimmer disc.
-const DISC_HIGH = [4.0, 3.9, 3.5];
-const DISC_LOW = [3.2, 1.5, 0.6];
-const MOON_DISC = [2.1, 2.3, 2.7];
-
-// A disc is drawn from a little under the horizon to a little over it, so it
-// does not pop on the frame where the arc crosses zero.
-const amt = (y: number): number => THREE.MathUtils.smoothstep(y, -0.02, 0.04);
 
 const _c = new THREE.Color();
 
@@ -334,35 +290,15 @@ function solve(): void {
   const t = (h - a.h) / (b.h - a.h);
   const n = (k: ScalarKey): number => THREE.MathUtils.lerp(a[k], b[k], t);
 
-  mixHex(dayState.zenith, a.zenith, b.zenith, t);
-  mixHex(dayState.horizon, a.horizon, b.horizon, t);
-  mixHex(dayState.sunTint, a.sunTint, b.sunTint, t);
   mixHex(dayState.sunColor, a.sunCol, b.sunCol, t);
   mixHex(dayState.moonColor, a.moonCol, b.moonCol, t);
   mixHex(dayState.hemiSky, a.hemiSky, b.hemiSky, t);
   mixHex(dayState.hemiGround, a.hemiGround, b.hemiGround, t);
 
-  dayState.haloK = n('haloK');
-  dayState.horizonGlow = n('horizonGlow');
-  dayState.stars = n('stars');
   dayState.sunIntensity = n('sunI');
   dayState.moonIntensity = n('moonI');
   dayState.hemiIntensity = n('hemiI');
   dayState.glint = n('glint');
-
-  // The disc's own colour is a function of how high the body is, not a
-  // keyframe: extinction reddens the sun long before it dims it, and the
-  // interpolation between "white at noon" and "orange at the horizon" is much
-  // easier to trust when it is driven by the same elevation the light uses.
-  const up = THREE.MathUtils.smoothstep(dayState.sunDir.y, 0.0, 0.3);
-  dayState.sunDisc.setRGB(
-    THREE.MathUtils.lerp(DISC_LOW[0], DISC_HIGH[0], up),
-    THREE.MathUtils.lerp(DISC_LOW[1], DISC_HIGH[1], up),
-    THREE.MathUtils.lerp(DISC_LOW[2], DISC_HIGH[2], up)
-  );
-  dayState.sunDiscAmt = amt(dayState.sunDir.y);
-  dayState.moonDisc.setRGB(MOON_DISC[0], MOON_DISC[1], MOON_DISC[2], THREE.LinearSRGBColorSpace);
-  dayState.moonDiscAmt = amt(dayState.moonDir.y);
 
   // Whichever light is brighter owns the specular path on the water. Compared
   // on intensity, not on elevation, because that is what decides how bright the

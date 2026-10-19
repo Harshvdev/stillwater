@@ -10,7 +10,7 @@ import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
 import { createCamera, updateCamera, resizeCamera, setRenderSize, snapToPixelGrid } from './camera';
-import { createSky, SUN_DISTANCE } from './sky';
+import { SUN_DISTANCE } from './constants';
 import {
   dayState, advanceDayNight, getHour, setHour, isRunning, setRunning,
   getCycleLength, setCycleLength,
@@ -31,17 +31,25 @@ const SCALE = PIXEL ? Math.max(1, Math.min(8, parseFloat(PIXEL) || 3)) : 3;
 
 function main(): void {
   const scene = new THREE.Scene();
-  // No scene.background: the sky is a real dome now (sky.ts), so that the
-  // gradient, the sun and the fog can all be made to agree with each other.
-  // The fog is keyed to the dome's own horizon colour rather than to a
-  // separately chosen palette entry, which is what used to leave a visible
-  // seam where the far ocean met the background. The colour is re-copied from
-  // the dome every frame, because over a day cycle the horizon moves from a
-  // pale blue to a burning orange to near-black.
-  scene.fog = new THREE.Fog(0xbfdcea, 120, 300);
-  // the reference the loop keeps, so the per-frame recolour does not have to
-  // narrow scene.fog back out of its `| null`
-  const fog = scene.fog as THREE.Fog;
+  // No sky, no background and no fog, all on purpose.
+  //
+  // The camera is orthographic and locked to a (-1,-1,-1) view direction, so the
+  // projection never puts a horizon on screen: the top of the frame is always
+  // sea, whatever the zoom. That was verified rather than assumed - a sky dome
+  // at radius 460 and scene.fog(120, 300) were both A/B'd against the rendered
+  // framebuffer across every hour and every reachable zoom, and both changed
+  // exactly zero pixels (the deepest visible point is ~102 units, short of the
+  // fog's near plane).
+  //
+  // So there is nothing here for a sky to fill and nothing for fog to fade.
+  // Removing both is not a downgrade - it is the same image with 241 lines of
+  // shader and a dead uniform hook taken out.
+  //
+  // The consequence worth naming: with no horizon there is no aerial
+  // perspective either, so the scene has no distance cue at all. Far grass is
+  // exactly as saturated as near grass. That is inherent to the projection, and
+  // it means every cue for depth has to come from geometry and cast shadow -
+  // which is why the flat interior is the thing worth fixing next.
 
   // The buffer size has to be known BEFORE the camera is built, not after: the
   // ortho frustum's horizontal extent is derived from it, and camera.ts snaps
@@ -175,7 +183,7 @@ function main(): void {
   //     the bloom pass only ever fired on the sun disc and the hand-authored
   //     water glints. Terrain had never bloomed, and could not.
   //
-  // Solving the same target properly, with the sun elevation from sky.ts (N.L
+  // Solving the same target properly, with the sun elevation from daynight.ts (N.L
   // 0.66 on a top face) and these light colours:
   //
   //     L(sun 0xfff2dc) = 0.899      L(hemi sky 0xdcefff) = 0.939
@@ -293,9 +301,6 @@ function main(): void {
   moon.shadow.normalBias = 0.05;
   scene.add(moon);
   scene.add(moon.target);
-
-  const sky = createSky();
-  scene.add(sky.mesh);
 
   const island = createIsland();
   const trees = createTrees();
@@ -423,10 +428,6 @@ function main(): void {
       light.position.copy(dir).multiplyScalar(SUN_DISTANCE).add(light.target.position);
       light.updateMatrixWorld();
     }
-
-    // The far sea has to fade into the same sky it is standing in front of, and
-    // that sky is now a different colour every hour.
-    fog.color.copy(dayState.horizon);
   };
 
   updateLights();
@@ -459,9 +460,6 @@ function main(): void {
     // fade anything standing between the camera and the player, after the
     // camera has settled on its new position
     updateTreeFade(player.position);
-    // The dome's uniforms are bound to live objects, but a ShaderMaterial's
-    // uniforms are only uploaded when it says so.
-    sky.sync();
     // through the composer, not straight to the screen, so bloom is applied
     composer.render();
   });

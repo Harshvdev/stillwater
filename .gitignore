@@ -2,7 +2,7 @@ node_modules/
 dist/
 .playwright-mcp/
 references/
-screenshots/
+/screenshots/
 *.log
 .DS_Store
 .idea/
