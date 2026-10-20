@@ -134,16 +134,20 @@ function main(): void {
   // cleanly:
   //
   //     sunlit sand (brightest ordinary surface)   1.00
-  //     foam / swash                              1.20
   //     water glint, at the top of a twinkle      ~2.2
   //     the sun's disc on the sky dome             4.0
   //
-  // 1.4 sits in the gap between surf and sparkle, and that gap is the whole
-  // point: it lets the glints and the sun glow while leaving the surf crisp.
-  // This was tried at 1.05, just under foam, and every wave crest bloomed - the
-  // thin white lines got smeared by the blur into soft clouds that read as fog
-  // lying on the sea rather than as surf. Bloom is a highlight effect, and
-  // anything covering a large area must never qualify for it.
+  // 1.4 sits above everything that is merely bright and below the sparkle,
+  // and that gap is the whole point: it lets the glints and the sun glow while
+  // leaving every ordinary surface crisp. This was tried at 1.05, just under
+  // the old foam, and every wave crest bloomed - the thin white lines got
+  // smeared by the blur into soft clouds that read as fog lying on the sea.
+  // Bloom is a highlight effect, and anything covering a large area must never
+  // qualify for it.
+  //
+  // The foam is gone now, which leaves the gap wider rather than changing the
+  // threshold: sunlit sand still tops out at 1.0, so 1.4 is still the line
+  // between a lit surface and a highlight.
   //
   // Strength is up from 0.5 to make up for far fewer pixels clearing the bar,
   // and the radius is tightened so the sparkle stays a sparkle.

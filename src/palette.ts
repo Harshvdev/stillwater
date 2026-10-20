@@ -103,9 +103,8 @@ export const PALETTE = {
   // seabed / cliff body - warm silt, not dead grey
   rock: [0xb0a084, 0xa08f72, 0x8e7e63, 0x7a6b54],
 
-  // water body, deep -> shallow, then foam
+  // water body, deep -> shallow
   water: [0x0b4f9e, 0x1176c4, 0x1aa8cc, 0x5fd6cc, 0xccebb8],
-  foam: 0xf4fffb,
 
   // player
   shirt: [0xe8564a, 0xcf4a3f, 0xb03c34],

@@ -93,6 +93,7 @@ function build(field: (x: number, y: number) => number, mid: number, spread: num
 let groundTex: THREE.DataTexture | null = null;
 let barkTex: THREE.DataTexture | null = null;
 let leafTex: THREE.DataTexture | null = null;
+let waterTex: THREE.DataTexture | null = null;
 
 /**
  * GROUND - grass, dirt, sand and rock all share this one.
@@ -145,9 +146,45 @@ function makeLeaf(): THREE.DataTexture {
   }, 0.45, 1.75);
 }
 
-export function blockTexture(kind: 'ground' | 'bark' | 'leaf'): THREE.DataTexture {
+/**
+ * WATER - the surface every water block carries.
+ *
+ * Minecraft's water texture is horizontal streaks: a few lighter ripples running
+ * across the block and a darker field between them. The noise here is sampled
+ * with its x compressed and its y stretched, so the features come out running
+ * the width of the block rather than sitting in blobs, and the result is
+ * quantised to four flat tones so it stays pixel art.
+ *
+ * Unlike the ground, the ground's rule does not apply here. The ground texture
+ * is pushed well down because a terrain face is the largest area on screen and
+ * the eye reads a strong pattern there as a printed-on design. Water is a large
+ * area too, but it is a surface that is *meant* to have ripples on it, and it
+ * is nearly flat and nearly featureless everywhere else - so the texture is
+ * what stops the sea reading as a sheet of coloured glass. It is kept
+ * deliberately shallow in contrast for the same reason the ground's is: enough
+ * to catch the light, not enough to look like a pattern.
+ */
+function makeWater(): THREE.DataTexture {
+  return build((x, y) => {
+    // The long streaks. The noise is sampled with its x compressed and its y
+    // stretched, so a feature is several texels wide and one tall: a ripple
+    // running across the block, not a blob in it.
+    const streak = value(x / 8, y / 1.2, 97);
+    // A second, finer set of streaks at a different scale, so the surface has
+    // two sizes of ripple rather than one.
+    const ripple = value(x / 3.4, y / 0.8, 103);
+    const field = streak * 0.62 + ripple * 0.38;
+    // Four flat tones, split around the field's own middle. The thresholds are
+    // close together on purpose: this is a surface ripple, and a wide spread
+    // here would put half the sea in shadow.
+    return levels(field, [0.42, 0.48, 0.54]) / 3;
+  }, 0.5, 1.0);
+}
+
+export function blockTexture(kind: 'ground' | 'bark' | 'leaf' | 'water'): THREE.DataTexture {
   if (kind === 'bark') return (barkTex ??= makeBark());
   if (kind === 'leaf') return (leafTex ??= makeLeaf());
+  if (kind === 'water') return (waterTex ??= makeWater());
   return (groundTex ??= makeGround());
 }
 

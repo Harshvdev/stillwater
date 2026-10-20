@@ -1,14 +1,22 @@
 import * as THREE from 'three';
-import { VOXEL, SEA_Y, voxelMaterial, levelAtWorld } from './island';
+import { VOXEL, SEA_Y, voxelMaterial, levelAtWorld, REGION_HALF } from './island';
 import { PALETTE } from './palette';
+import { blockTexture } from './textures';
 import { applyCloudShadows } from './clouds';
 import { dayState } from './daynight';
 
-// voxel sea: one column per water cell, stretched from the seabed up to the
-// waterline so the depth steps read as terraced blocks. Colours come from a
-// quantised port of the original TSL shader - depth ramp, marching foam rings,
-// shore swash and sparkles - all snapped to whole cells and to a 10 fps clock
-// so the animation moves on GBA frames instead of sliding smoothly.
+// voxel sea: one flat sheet per water cell, lying on the waterline, with the
+// depth carried by colour and by opacity rather than by a column of water.
+// The seabed underneath is voxel terrain like everything else, so the terraced
+// depth steps are still there to be seen through the shallows. Colours come
+// from a quantised port of the original TSL shader - the depth ramp and the
+// sun sparkles - all snapped to whole cells and to a 10 fps clock so the
+// animation moves on GBA frames instead of sliding smoothly.
+//
+// There is no foam. The original shader drew rings of white surf travelling
+// in from every direction, and it is not here any more: with the water
+// translucent, a flat white sheet lying on top of a window is the one thing
+// that cannot read as water.
 const HALF = 110; // water grid half-extent, past the island and out to the fog
 const N = (HALF * 2) / VOXEL;
 // must track the island's MIN_LEVEL: the water floor has to sit at the same
@@ -29,10 +37,9 @@ const vn = (x: number, y: number, s = 0): number => {
 };
 
 const RAMP = PALETTE.water.map((h) => new THREE.Color().setHex(h, THREE.SRGBColorSpace));
-const WHITE = new THREE.Color().setHex(PALETTE.foam, THREE.SRGBColorSpace);
 
-// Sun glint. A pale sea-green rather than the pure foam white: glinting water
-// is not the same as surf, and tinting it keeps the sparkle from reading as a
+// Sun glint. A pale sea-green rather than a pure white: glinting water is not
+// the same as surf, and tinting it keeps the sparkle from reading as a
 // blown-out highlight when the bloom pass picks it up.
 const GLINT = new THREE.Color().setHex(0xd8f2ea, THREE.SRGBColorSpace);
 // How hard a glint pushes past its own colour at the top of its twinkle. This
@@ -129,6 +136,42 @@ const GLINT_ORIGIN = { x: 0, z: 0 };
 const _v = new THREE.Vector3();
 const _h = new THREE.Vector3();
 
+// ---------------------------------------------------------------- opacity
+//
+// How see-through a water block is, decided by how deep its floor is.
+//
+// This is the whole of the sea's transparency, and it is per block rather than
+// per material because that is the only way a depth-graded sea can exist in a
+// single draw call: the shallow water over the shelf is a window onto the
+// sand, and the deep water six blocks down is not.
+//
+// The numbers are read off the shelf rather than picked. The seabed steps down
+// one block at a time from the waterline, so a block's depth IS how many
+// voxels of water sit between it and the sand - one block of water over the
+// first step, six over the last. At the shallowest the water is a little over
+// four tenths opaque and the sand under it reads clearly; by the time the
+// floor is three blocks down the water is two thirds opaque and the bottom is
+// only a shape under it; at six it is solid.
+//
+// The last step is the important one. Deep water being fully opaque is what
+// stops the sea from turning into a window onto the rock six units down, and
+// it is also what hides the seam where the seabed stops existing - past the
+// island's own grid there is no floor to see, only the far ocean plane.
+//
+// The step is 0.116 for exactly that reason: it lands the deepest water on
+// 1.0 exactly rather than 0.995, because 0.5% of the far side of that seam
+// showing through is 0.5% of a hard edge that should not exist.
+const ALPHA_SHALLOW = 0.42;
+const ALPHA_PER_BLOCK = 0.116;
+
+function depthAlpha(depth: number): number {
+  return THREE.MathUtils.clamp(
+    ALPHA_SHALLOW + (depth - 1) * ALPHA_PER_BLOCK,
+    ALPHA_SHALLOW,
+    1
+  );
+}
+
 /**
  * Re-solve the reflection geometry for the light that is currently the key.
  *
@@ -159,9 +202,6 @@ interface WaterCell {
   z: number;
   depth: number;
   w: number;
-  r: number;
-  nx: number;
-  nz: number;
   i: number;
   j: number;
 }
@@ -170,20 +210,128 @@ let mesh: THREE.InstancedMesh;
 let cells: WaterCell[] = [];
 let lastFrame = -1;
 
+/**
+ * The far ocean: a square frame of water with the island's own grid cut out
+ * of the middle.
+ *
+ * The hole is REGION_HALF, the edge of the voxelised terrain, so the frame
+ * begins exactly where the seabed stops existing. Inside the hole the real
+ * seabed is what you see through the translucent water; outside it, the frame
+ * is the flat deep ocean that keeps the world from ending in a void.
+ *
+ * The UVs of a ShapeGeometry are the shape's own coordinates, which here are
+ * world units. The ripple texture therefore tiles once per world unit on its
+ * own, with no repeat set - the same scale as the water blocks.
+ *
+ * The shape is left in its own XY plane and laid flat by the mesh's rotation,
+ * the same way the plane it replaced was.
+ */
+function oceanGeometry(): THREE.BufferGeometry {
+  const OUTER = 350;
+  const shape = new THREE.Shape();
+  shape.moveTo(-OUTER, -OUTER);
+  shape.lineTo(OUTER, -OUTER);
+  shape.lineTo(OUTER, OUTER);
+  shape.lineTo(-OUTER, OUTER);
+  shape.closePath();
+
+  const hole = new THREE.Path();
+  const h = REGION_HALF;
+  hole.moveTo(-h, -h);
+  hole.lineTo(-h, h);
+  hole.lineTo(h, h);
+  hole.lineTo(h, -h);
+  hole.closePath();
+  shape.holes.push(hole);
+
+  return new THREE.ShapeGeometry(shape);
+}
+
+/**
+ * The far ocean's material.
+ *
+ * The ripple texture cannot be handed to three as a plain `map`: a map
+ * multiplies the colour by the texel, and this texture is a brightness
+ * MULTIPLIER centred on its mid level rather than a colour, so a plain map
+ * would halve the ocean's brightness. It is sampled here instead and centred
+ * the same way the water blocks centre it, so the far sea and the near sea
+ * are the same surface at the same brightness.
+ */
+function oceanMaterial(): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    color: PALETTE.water[0],
+    roughness: 0.2,
+    metalness: 0,
+    // The map slot is what binds the texture and declares the UV varying; the
+    // chunk that would normally read it is replaced below.
+    map: blockTexture('water'),
+  });
+  mat.customProgramCacheKey = () => 'ocean:ripple';
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `// The same ripple the water blocks carry, centred on its mid level rather
+// than used as three's plain map multiply. A map multiplies the colour by the
+// texel, and this texture is a brightness MULTIPLIER centred on its mid level
+// rather than a colour, so a plain map would halve the ocean's brightness.
+//
+// The UVs are world units, so this tiles once per unit with no repeat to set.
+diffuseColor.rgb *= 1.0 + (texture2D(map, vMapUv).r - 0.5) * 0.42;`
+    );
+  };
+  return mat;
+}
+
 export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } {
   const max = N * N;
-  const geo = new THREE.BoxGeometry(1, 1, 1);
+  // A flat sheet, one quad per water cell, lying on the waterline.
+  //
+  // It used to be a box per cell, stretched from the seabed up to the
+  // waterline, so that the depth steps read as terraced blocks of water. That
+  // was never actually visible: the far ocean plane sat half a voxel under the
+  // waterline across the whole world, so everything below the waterline was
+  // hidden and all you could see of each column was a sliver of its side.
+  //
+  // With the water transparent that stops working anyway. A volume of water
+  // seen through a transparent surface shows its own internal walls - every
+  // terrace step becomes a vertical pane of glass under the surface, and from
+  // an isometric camera those panes cross the sea as diagonal bands that read
+  // as artefacts rather than as depth.
+  //
+  // A sheet has none of that, and it does not need the volume: the terracing
+  // is the SEABED's, and the seabed is already built out of voxel terraces
+  // one block apart. Through clear water you can see them, which is what the
+  // depth steps were always trying to say.
+  //
+  // It is also six times less geometry - two triangles a cell instead of
+  // twelve - and every one of those triangles is now blended rather than
+  // depth-tested away.
+  const geo = new THREE.PlaneGeometry(1, 1);
+  geo.rotateX(-Math.PI / 2);
   // Smooth and barely rough. Water is the one surface here that is genuinely
   // specular, and this is what gives the sea a real sun highlight instead of a
   // painted-on one: the directional light's reflection lobe lands as a band
   // across the whole plane of water, which is the same place the hand-placed
   // glint band in updateWater already draws. The two reinforce each other
   // rather than replacing one another - one is the physical highlight, the
-  // other is the per-cell foam and twinkle on top of it.
-  const mat = voxelMaterial({ rough: 0.14 });
+  // other is the per-cell twinkle on top of it.
+  //
+  // `tex: 'water'` is what puts a surface on the sea: every water block
+  // carries the same ripple texture the land blocks carry their own, tiled
+  // once per voxel, so a block of water reads as a block of water rather than
+  // as a coloured pane.
+  //
+  // `instAlpha` is what makes the sea a sea over a floor: each block's
+  // opacity comes from its own depth, so the shallows are see-through and the
+  // deep water is not.
+  const mat = voxelMaterial({ rough: 0.14, tex: 'water', instAlpha: true });
   const topAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
   topAttr.setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('aTop', topAttr);
+  // per-block opacity. Its own buffer, indexed by instance, like aTop.
+  const alphaAttr = new THREE.InstancedBufferAttribute(new Float32Array(max), 1);
+  alphaAttr.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('aAlpha', alphaAttr);
   mesh = new THREE.InstancedMesh(geo, mat, max);
   mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
   mesh.frustumCulled = false;
@@ -202,24 +350,23 @@ export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } 
       const depth = SEA_Y - bottom;
       if (depth <= 0) continue;
 
-      const r = Math.hypot(x, z) + 0.001;
       cells.push({
         x, z, depth,
         // the shelf is now 6 blocks deep at most, not 7 world units of an
         // 8-unit seabed, so the ramp is scaled to the current floor
         w: THREE.MathUtils.clamp(1 - depth / 6, 0, 1),
-        r,
-        nx: x / r,
-        nz: z / r,
         i, j,
       });
 
-      m.makeScale(VOXEL, depth, VOXEL);
-      m.setPosition(x, bottom + depth / 2, z);
+      // the sheet lies flat on the waterline. The depth of this cell is
+      // carried by its colour and its opacity, not by a column of water.
+      m.makeScale(VOXEL, 1, VOXEL);
+      m.setPosition(x, SEA_Y, z);
       mesh.setMatrixAt(n, m);
       c.copy(RAMP[0]);
       mesh.setColorAt(n, c);
       topAttr.setXYZ(n, c.r, c.g, c.b);
+      alphaAttr.setX(n, depthAlpha(depth));
       n++;
     }
   }
@@ -227,6 +374,7 @@ export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } 
   mesh.instanceMatrix.needsUpdate = true;
   mesh.instanceColor!.needsUpdate = true;
   topAttr.needsUpdate = true;
+  alphaAttr.needsUpdate = true;
 
   // flat deep ocean past the voxel grid so the horizon never shows a void.
   //
@@ -235,18 +383,32 @@ export function createWater(): { mesh: THREE.InstancedMesh; ocean: THREE.Mesh } 
   // otherwise shaded scene. Giving it a Standard material with water's
   // roughness lets the sun lay a specular band across the open sea and lets
   // the sky fill grade it, so it recedes into the fog the way the shallows do.
+  //
+  // IT HAS A HOLE IN IT, and that is the whole reason the seabed is visible
+  // at all.
+  //
+  // It used to be a single 700x700 plane centred on the island, which meant it
+  // sat UNDER THE ENTIRE ISLAND as well as under the open sea - a lid on the
+  // world at y = -0.05, half a voxel below the waterline. Everything below it
+  // was hidden: the seabed, the terraced steps under the shallows, the whole
+  // underwater half of the scene. It did not show, because the water on top of
+  // it was opaque, and the water was opaque because the floor was never
+  // visible through it in the first place. The two facts propped each other
+  // up.
+  //
+  // The hole is cut to the island's own grid - REGION_HALF, the edge of the
+  // voxelised terrain - so that inside it the real seabed is what you see
+  // through the water, and outside it the plane carries on as the flat deep
+  // ocean it was always meant to be. The two meet at a point where the water
+  // is fully opaque (see depthAlpha), so the seam cannot show.
   const ocean = new THREE.Mesh(
-    new THREE.PlaneGeometry(700, 700),
+    oceanGeometry(),
     // Cloud shadows reach the open sea too. Without this the near water is
     // shaded by passing clouds and the far ocean past the voxel grid is not,
     // and the boundary between them is exactly where the pattern appears to
     // stop - which reads as the edge of the effect rather than as the edge of
     // the water.
-    applyCloudShadows(new THREE.MeshStandardMaterial({
-      color: PALETTE.water[0],
-      roughness: 0.2,
-      metalness: 0,
-    }))
+    applyCloudShadows(oceanMaterial())
   );
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = SEA_Y - 0.05;
@@ -264,6 +426,7 @@ export function updateWater(t: number): void {
   const tf = frame / 10;
 
   const topAttr = mesh.geometry.getAttribute('aTop') as THREE.InstancedBufferAttribute;
+  const alphaAttr = mesh.geometry.getAttribute('aAlpha') as THREE.InstancedBufferAttribute;
 
   // The reflection follows the key light, which moves with the day.
   aimGlitter();
@@ -292,23 +455,22 @@ export function updateWater(t: number): void {
       (0.96 + 0.04 * hs(cell.i, cell.j, Math.floor(tf * 0.5)));
     shadeColor.multiplyScalar(shade);
 
-    // foam: rings travelling inward from all directions (the TSL wave phase)
-    const wph = cell.r * 0.24 - tf * 1.15 + cell.nx * 2.0 + cell.nz * 1.2;
-    const p = wph / 6.2831;
-    const fi = p - Math.floor(p);
-    const band = fi >= 0.05 && fi <= 0.28;
-    // kept to the shallows: open water stays clean, so the rings read as surf
-    const on = w > 0.45 && w < 0.94;
-    // lace at roughly two wave widths, so foam breaks into chunky cells
-    const lace = vn(cell.x * 0.085, cell.z * 0.085, 3) > 0.38;
-    const foam = band && on && lace;
+    // NO FOAM.
+    //
+    // The surf is gone. There used to be two white effects here: rings of foam
+    // travelling inward from every direction (the TSL wave phase, laced so it
+    // broke into chunky cells) and a swash that brightened the crest right at
+    // the waterline. Both painted the cell flat white, and with the water now
+    // translucent they were the one thing in the sea that could not be
+    // anything but a solid shape - a flat white sheet lying on top of a
+    // window, which is the one combination that does not read as water.
+    //
+    // What the sea has instead is the depth ramp, the ripple texture and the
+    // glint, and the sand under the shallows. The shore still reads: the water
+    // gets paler as the bottom comes up, and the sand comes through it.
 
-    // swash: crest brightening right at the waterline
-    const swash = Math.sin(wph) > 0.8 && cell.depth < 1.8;
-
-    if (foam || swash) {
-      shadeColor.copy(WHITE);
-    }
+    // How opaque this block is: purely a function of the depth under it.
+    alphaAttr.setX(k, depthAlpha(cell.depth));
 
     // Sun glint, drawn over the top of whatever the cell already is.
     //
@@ -350,4 +512,5 @@ export function updateWater(t: number): void {
   }
   mesh.instanceColor!.needsUpdate = true;
   topAttr.needsUpdate = true;
+  alphaAttr.needsUpdate = true;
 }

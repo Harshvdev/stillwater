@@ -221,14 +221,27 @@ const edgeColor = new THREE.Color().setHex(PALETTE.edgeLine, THREE.SRGBColorSpac
 const EDGE_COL_GLSL = `vec3(${edgeColor.r.toFixed(4)}, ${edgeColor.g.toFixed(4)}, ${edgeColor.b.toFixed(4)})`;
 
 export function voxelMaterial(opts: {
-  bands?: boolean; outline?: boolean; fade?: boolean; tex?: 'ground' | 'bark' | 'leaf';
-  rough?: number; metal?: number; wind?: boolean;
+  bands?: boolean; outline?: boolean; fade?: boolean; tex?: 'ground' | 'bark' | 'leaf' | 'water';
+  rough?: number; metal?: number; wind?: boolean; instAlpha?: boolean;
 } = {}): THREE.MeshStandardMaterial {
   const bands = opts.bands === true;
 
   const outline = opts.outline === true;
   const fade = opts.fade === true;
   const wind = opts.wind === true;
+  // `instAlpha` reads a per-instance aAlpha and multiplies it into the
+  // fragment's alpha.
+  //
+  // This is what the sea's transparency is built on: one material and one draw
+  // call for every water block, with each block's opacity decided by how deep
+  // its floor is. The shallows are see-through and the deep water is not, and
+  // the seabed shows through the first while the second stays a solid sheet.
+  //
+  // It is a per-instance term rather than a per-material one because opacity
+  // that varies across the sea has to vary WITH the sea. A single material
+  // alpha would make every block of water equally clear, which is the one
+  // thing a depth-graded sea cannot be.
+  const instAlpha = opts.instAlpha === true;
   // `tex` picks the block texture this material draws on every face - the grass
   // block's tufted noise, a log's vertical grain, a leaf block's mottling - and it
   // is the one shading term that needs the fragment's world position, because
@@ -256,11 +269,19 @@ export function voxelMaterial(opts: {
     color: 0xffffff,
     roughness: opts.rough ?? 0.88,
     metalness: opts.metal ?? 0,
+    // Only the water is transparent, and it is the only surface in the scene
+    // with something behind it worth seeing - the seabed under the shallows.
+    //
+    // depthWrite stays on. The water writes its own depth, so the sea surface
+    // occludes what is behind it rather than blending with it, and the only
+    // transparent object in the scene is the sea itself - there is nothing for
+    // it to be sorted against.
+    transparent: instAlpha,
   });
   // every variant compiles from one onBeforeCompile source, so the cache key has
   // to name exactly which combination this material is
   mat.customProgramCacheKey = () =>
-    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}:${tex ?? 'none'}:${wind ? 'wind' : 'still'}`;
+    `voxel:${bands ? 'bands' : 'flat'}:${outline ? 'outline' : 'plain'}:${fade ? 'fade' : 'solid'}:${tex ?? 'none'}:${wind ? 'wind' : 'still'}:${instAlpha ? 'alpha' : 'opaque'}`;
   mat.onBeforeCompile = (shader) => {
     if (tex) shader.uniforms.uBlockTex = { value: blockTexture(tex) };
     if (wind) {
@@ -278,6 +299,7 @@ varying float vTopMix;
 ${bands ? 'attribute float aBandTop;\nvarying float vBandTop;\nvarying float vWorldY;' : ''}
 ${outline ? 'attribute vec2 aExpose;\nvarying vec2 vExpose;\nvarying vec3 vLocal;' : ''}
 ${fade ? 'attribute float aFade;\nvarying float vFade;' : ''}
+${instAlpha ? 'attribute float aAlpha;\nvarying float vAlpha;' : ''}
 ${tex ? 'varying vec3 vWorldPos;\nvarying vec3 vTexNormal;' : ''}
 ${wind ? 'uniform float uWindTime;\nuniform vec2 uWindDir;\nuniform float uWindStrength;\nattribute vec4 aTree;' : ''}`
       )
@@ -289,6 +311,7 @@ vTopMix = step(0.5, normal.y);
 ${bands ? 'vBandTop = aBandTop;\nvWorldY = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;' : ''}
 ${outline ? 'vExpose = aExpose;\nvLocal = position;' : ''}
 ${fade ? 'vFade = aFade;' : ''}
+${instAlpha ? 'vAlpha = aAlpha;' : ''}
 ${
   tex
     ? `vWorldPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
@@ -397,7 +420,8 @@ float bayer4(vec2 c) {
   v += (((x & 2) >> 1) ^ ((y & 2) >> 1)) * 2;
   v += ((y & 2) >> 1);
   return float(v) / 16.0;
-}` : ''}`
+}` : ''}
+${instAlpha ? 'varying float vAlpha;' : ''}`
       )
       .replace(
         '#include <color_fragment>',
@@ -445,6 +469,32 @@ ${tex === 'leaf' ? `// LEAF: the leaf block's texture.
 // purpose: PALETTE.leaf stays narrow between cubes, this does the work inside
 // them.
 diffuseColor.rgb *= blockTex(vWorldPos, vTexNormal);` : ''}
+${tex === 'water' ? `// WATER: the surface texture every water block carries.
+//
+// The sea is the one surface in the scene that is nearly flat, nearly
+// featureless and very large, so it is the surface that most needs something
+// on it: without this the whole ocean is a sheet of coloured glass.
+//
+// The texture is centred on its own mid level rather than on white, which is
+// what the other three do. Those are multipliers that darken a face on
+// average - the ground's runs about a fifth dark - and on terrain that reads
+// as grain. Water is bright and it is the top of the frame, so it is centred
+// instead: the ripples push a little above and a little below the block's own
+// colour and the mean brightness of the sea is left exactly where it was.
+//
+// The contrast is shallow on purpose. The sea is a large area, and the eye
+// reads a strong pattern across a large area as a printed-on design.
+diffuseColor.rgb *= 1.0 + (blockTex(vWorldPos, vTexNormal) - 0.5) * 0.42;` : ''}
+${instAlpha ? `// Per-instance opacity. aAlpha is 1 for the opaque deep water and
+// well under half for the shallows, so the seabed reads through the water
+// where the bottom is close and is swallowed by it where the bottom is far.
+//
+// This is a plain alpha multiply rather than the ordered dither the tree fade
+// uses, and deliberately so: the fade is a per-pixel decision about whether a
+// fragment survives, which has to be stable in screen space or it crawls. The
+// water's alpha is a smooth property of the block, so it wants the real thing
+// - a continuous blend against what is behind it.
+diffuseColor.a *= vAlpha;` : ''}
 ${bands ? `// Sky occlusion down a shaft. This is a light-attenuation term, not a
 // face shade: the cliff's normal is constant over every row of the stretched
 // base box, so without this a lit cliff is one dead-even slab. One flat step
