@@ -36,6 +36,21 @@ export function isJumpHeld(): boolean {
   return keys.has('Space');
 }
 
+/**
+ * Whether Shift is currently held down.
+ *
+ * Shift is the dive key: in water it takes the player down. The same key is
+ * what Minecraft uses to sneak, and the same key is what a player will try
+ * when they want to go under - so it is the obvious one to use, and it is the
+ * one that does nothing anywhere else in this game.
+ *
+ * A held state, for the same reason Space is: the dive is continuous rather
+ * than a press.
+ */
+export function isDiveHeld(): boolean {
+  return keys.has('ShiftLeft') || keys.has('ShiftRight');
+}
+
 // returns movement intent in screen space: x right, y up
 export function getMoveInput(): { x: number; y: number } {
   let x = 0;

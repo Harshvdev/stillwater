@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SEA_Y, waterDepthAt } from './island';
 import { PALETTE } from './palette';
 import { splashRing } from './textures';
-import { playerEvents } from './player';
+import { playerEvents, playerIsSwimming } from './player';
 
 /**
  * Splashing.
@@ -364,8 +364,19 @@ export function createSplash(): SplashSystem {
       const inWater = depth > 0.05 && player.position.y < SEA_Y - 0.05;
 
       if (inWater && !state.inWater) {
-        // Stepping in. A small burst - they walked in, they did not jump in.
-        system.splash(px, pz, 0.6);
+        // Crossing the surface, and how hard.
+        //
+        // The splash is sized by the speed of arrival, which is the whole
+        // difference between a foot going into a puddle and a body hitting
+        // the water. Someone who walks in arrives at walking speed and
+        // barely disturbs the sea; someone who jumps in arrives at whatever
+        // the fall was, and throws it about.
+        //
+        // A fixed size here was wrong in a way that was obvious once seen:
+        // walking in produced a big splash and jumping in a small one,
+        // which is the exact opposite of what either of them should do.
+        const impact = Math.min(1.9, 0.3 + Math.abs(Math.min(0, playerEvents.vy)) * 0.11);
+        system.splash(px, pz, impact);
         // The first footstep waits for the entry to have been and gone, so
         // the two do not land on the same frame.
         state.stepTimer = 0.3;
@@ -376,11 +387,31 @@ export function createSplash(): SplashSystem {
       }
       state.inWater = inWater;
 
+      // Wading to swimming. The water closes over them and the surface
+      // breaks around them, which is a moment of its own - the same water
+      // they were already standing in, but a foot deeper.
+      //
+      // Small, because the entry splash has already been and gone by the
+      // time anyone reaches water this deep, and a walk in is a walk in
+      // however deep it gets.
+      const nowSwimming = playerIsSwimming();
+      if (nowSwimming && !state.wasSwimming) {
+        system.splash(px, pz, 0.45);
+      }
+      state.wasSwimming = nowSwimming;
+
+      // Landing on the seabed.
+      //
+      // Small, and only near the surface. This is the disturbance of hitting
+      // a floor under the water, not of hitting the water itself - the big
+      // splash belongs to the surface, and it has already happened by the
+      // time anyone reaches the bottom. A landing three blocks down is not
+      // a splash at the surface three blocks above it.
       if (inWater && playerEvents.landed) {
-        // Landing in it. The speed is what makes this different from
-        // stepping in: a drop from a block up throws water a long way.
-        const power = Math.min(1.9, 0.55 + playerEvents.landSpeed * 0.15);
-        system.splash(px, pz, power);
+        const near = player.position.y > SEA_Y - 1.4;
+        if (near && playerEvents.landSpeed > 3.5) {
+          system.splash(px, pz, Math.min(0.9, 0.3 + playerEvents.landSpeed * 0.08));
+        }
       }
 
       // Wading. Every so often while they are moving through it, a little
@@ -407,6 +438,7 @@ export function createSplash(): SplashSystem {
   // The player's water state, kept between frames.
   const state = {
     inWater: false,
+    wasSwimming: false,
     lastX: 0,
     lastZ: 0,
     stepTimer: 0,
