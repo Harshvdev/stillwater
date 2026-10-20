@@ -26,6 +26,7 @@ import { updateWind } from './wind';
 import { updateClouds, cloudUniforms } from './clouds';
 import { initCoordinates, syncCoordinates } from './coordinates';
 import { createFallingLeaves, updateFallingLeaves } from './fallingLeaves';
+import { createAlgae, updateAlgae } from './algae';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -326,6 +327,14 @@ function main(): void {
   const fallingLeaves = createFallingLeaves();
   scene.add(fallingLeaves);
 
+  // The algae on the seabed, under the water.
+  //
+  // Created after the island, because the planting reads the terrain's own
+  // level grid to find the shelf - the ring of seabed where the water above
+  // is shallow enough to see through.
+  const algae = createAlgae();
+  scene.add(algae);
+
   // Everything solid casts onto everything solid. The ocean plane is excluded:
   // it is a single huge quad at sea level, so letting it receive would put a
   // hard shadow edge across open water.
@@ -369,6 +378,18 @@ function main(): void {
     }
   });
   water.receiveShadow = true;
+
+  // The algae cast and receive like the grass does. A frond on a sand floor
+  // throws a shape onto the sand, and on a floor that is flat and mostly lit
+  // that shape is most of what gives the seabed any depth. The water does not
+  // cast, so the light still reaches the seabed through it.
+  algae.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    }
+  });
 
   const player = createPlayer();
   // drop the player onto the island rather than at a fixed height
@@ -460,6 +481,9 @@ function main(): void {
     // updateWind just rotated.
     updateClouds(dt, t, Math.max(sun.intensity, moon.intensity));
     updateFallingLeaves(dt, t);
+    // The current under the water is its own thing, but it runs on the same
+    // clock as everything else.
+    updateAlgae(t);
     // TEMPORARY: keeps the debug sidebar reading live state. See the imports
     // above.
     syncDaySlider();
@@ -513,6 +537,7 @@ function main(): void {
       updateWind(dt, t);
       updateClouds(dt, t, Math.max(sun.intensity, moon.intensity));
       updateFallingLeaves(dt, t);
+      updateAlgae(t);
       updatePlayer(player, dt);
       sand.update(dt, player.position);
       updateWater(t);

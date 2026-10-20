@@ -329,3 +329,100 @@ const grassMasks: Partial<Record<GrassKind, THREE.DataTexture>> = {};
 export function grassMask(kind: GrassKind): THREE.DataTexture {
   return (grassMasks[kind] ??= makeBladeMask(BLADE_PATTERNS[kind]));
 }
+
+// ------------------------------------------------------- algae silhouettes
+//
+// The underwater plants are the same kind of object as the tall grass - a
+// card with a cut-out silhouette - but they are not the same shape, and the
+// difference is the point.
+//
+// A blade of grass is a blade: one tapering line, narrow, upright, and it
+// differs from its neighbours only in how tall it is. The three designs above
+// are all variations on that one silhouette, which is right for a meadow -
+// a meadow is one thing repeated.
+//
+// Underwater there are three genuinely different organisms, and a meadow of
+// one shape at the bottom of the sea would read as seaweed pasted onto a
+// slope. So the silhouettes here are three different plants:
+//
+//   KELP  a frond: one stalk running up the card with alternating lobes
+//         hanging off it, leaning as it rises. Tall, narrow, and the only one
+//         of the three that wants to be somewhere deeper than the shore.
+//   FAN   a sea fan: a broad ribbed fan on a stem, the shape a gorgonian
+//         makes when it spreads itself across the current.
+//   TUFT  a low clump of separate blades out of one root - the short one,
+//         the one that fills the gaps between the other two.
+//
+// The same two-tone convention as the grass: '#' is the lit face of the plant
+// and 'x' the shaded one, so a single card carries its own light and shade
+// rather than relying on the sun to find a form in a flat silhouette.
+
+export type AlgaeKind = 'kelp' | 'fan' | 'tuft';
+
+const ALGAE_PATTERNS: Record<AlgaeKind, readonly string[]> = {
+  // KELP - a frond with lobes alternating along a leaning stalk.
+  kelp: [
+    '.........##.....',
+    '........#xx#....',
+    '.......#xxxx#...',
+    '.......#xx#.....',
+    '......#xx#......',
+    '.....#xxxx#.....',
+    '.....#xx#.......',
+    '....#xx#........',
+    '...#xxxx#.......',
+    '...#xx#.........',
+    '..#xxxx#........',
+    '..#xx#..........',
+    '.#xxxx#.........',
+    '.#xx#...........',
+    '#xxxx#..........',
+    '####............',
+  ],
+
+  // FAN - a ribbed sea fan on a stem.
+  fan: [
+    '..#..#..#..#....',
+    '.#x#.#x#.#x#....',
+    '.#xx##xx##xx#...',
+    '..#xx#xx#xx#....',
+    '..#xx#xx#xx#....',
+    '...#x#xx#xx#....',
+    '...#xx#xx#x#....',
+    '....#xx#xx#.....',
+    '....#xx#x#......',
+    '.....#xxx#......',
+    '.....#xx#.......',
+    '......#x#.......',
+    '......#x#.......',
+    '.......#........',
+    '.......#........',
+    '.......#........',
+  ],
+
+  // TUFT - separate blades fanning out of one root.
+  tuft: [
+    '..#.....#....#..',
+    '.#x#...#x#...#x#',
+    '.#x#..#xx#..#x#.',
+    '..#x#.#xx#.#x#..',
+    '..#xx##xx##xx#..',
+    '..#xx#xx#xx#x#..',
+    '...#x#xx#xx#x#..',
+    '...#xx#xx#xx#...',
+    '....#xx#xx#x#...',
+    '....#x#xx#x#....',
+    '.....#xx#x#.....',
+    '.....#xx#x#.....',
+    '......#xx#......',
+    '......#xx#......',
+    '.......##.......',
+    '.......##.......',
+  ],
+};
+
+const algaeMasks: Partial<Record<AlgaeKind, THREE.DataTexture>> = {};
+
+export function algaeMask(kind: AlgaeKind): THREE.DataTexture {
+  return (algaeMasks[kind] ??= makeBladeMask(ALGAE_PATTERNS[kind]));
+}

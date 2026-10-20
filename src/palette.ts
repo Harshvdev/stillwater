@@ -106,6 +106,16 @@ export const PALETTE = {
   // water body, deep -> shallow
   water: [0x0b4f9e, 0x1176c4, 0x1aa8cc, 0x5fd6cc, 0xccebb8],
 
+  // Underwater plants.
+  //
+  // Cooler and darker than the land greens, and that is not a mood choice: an
+  // underwater plant is only ever seen through the water's own blue, and a
+  // warm land green under a blue filter comes out as mud. These are pushed
+  // towards teal for the same reason the sea is, and the darkest entry is a
+  // long way below the lightest - a plant in deep shade on a sand floor is
+  // most of what you see of it.
+  algae: [0x5aa06d, 0x468257, 0x366545],
+
   // player
   shirt: [0xe8564a, 0xcf4a3f, 0xb03c34],
   pants: [0x3a4a7a, 0x2f3c66, 0x26304f],

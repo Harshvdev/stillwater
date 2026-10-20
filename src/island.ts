@@ -139,8 +139,8 @@ function kindOf(h: number, level: number): number {
   return ROCK;
 }
 
-const cellX = (i: number) => (i - GRID / 2 + 0.5) * VOXEL;
-const cellZ = (j: number) => (j - GRID / 2 + 0.5) * VOXEL;
+// cellX and cellZ are declared further down, next to levelAtWorld, so that
+// anything planting on the terrain can read the same mapping.
 
 
 
@@ -173,6 +173,35 @@ export function levelAtWorld(x: number, z: number): number {
   const k = colIndex(x, z);
   if (k < 0) return MIN_LEVEL;
   return levels[k];
+}
+
+/**
+ * How deep the water is over a point: the number of blocks of water between
+ * the seabed and the waterline.
+ *
+ * Zero where the point is dry, and zero outside the voxelised region, where
+ * there is no seabed at all - the floor there is the far ocean plane, and
+ * nothing can be planted on it.
+ *
+ * This is the number the underwater planting is built on. The shelf steps down
+ * one block at a time from the waterline, so this is how many blocks of water
+ * stand over a given piece of floor, and it is both where a plant is allowed
+ * to grow and how much room it has to grow in.
+ */
+export function waterDepthAt(x: number, z: number): number {
+  if (x < -REGION_HALF || x >= REGION_HALF || z < -REGION_HALF || z >= REGION_HALF) return 0;
+  const level = levels[colIndex(x, z)];
+  return level < 0 ? -level * VOXEL : 0;
+}
+
+// the world position of a grid cell's centre, exported so anything that plants
+// something on the terrain reads the cell-to-world mapping from one place
+export function cellX(i: number): number {
+  return (i - GRID / 2 + 0.5) * VOXEL;
+}
+
+export function cellZ(j: number): number {
+  return (j - GRID / 2 + 0.5) * VOXEL;
 }
 
 // ----------------------------------------------------------------- material
