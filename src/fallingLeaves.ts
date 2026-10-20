@@ -10,6 +10,11 @@ import { getWindAt } from './wind';
  * Drops strictly from the underside of tree canopies, falling down directly
  * within the tree's canopy footprint onto the ground below. Leaves never spawn
  * above the tree or drift outside the canopy bounds.
+ *
+ * `onWaterLand` is called with the world position of any leaf that lands on
+ * the water rather than on the ground. A leaf touching the surface of the sea
+ * disturbs it, and a ring is the whole of that disturbance - a leaf is light
+ * enough that it does not throw any water up.
  */
 
 const MAX_LEAVES = 90;
@@ -42,6 +47,10 @@ interface LeafParticle {
 
 const particles: LeafParticle[] = [];
 let leafMesh: THREE.InstancedMesh | null = null;
+
+// Called with the world position of a leaf that has just landed on the
+// water. Set by createFallingLeaves.
+let waterLand: ((x: number, z: number) => void) | null = null;
 
 const _pos = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
@@ -102,7 +111,13 @@ function respawnLeaf(p: LeafParticle, initialProgress = false): void {
   p.timer = 0;
 }
 
-export function createFallingLeaves(): THREE.InstancedMesh {
+export function createFallingLeaves(
+  onWaterLand: ((x: number, z: number) => void) | null = null
+): THREE.InstancedMesh {
+  // Kept at module scope because the leaves are stepped by a module-level
+  // function, and the callback belongs to the leaves rather than to the
+  // frame that made them.
+  waterLand = onWaterLand;
   const geo = new THREE.BoxGeometry(LEAF_W, LEAF_H, LEAF_W);
   const mat = new THREE.MeshStandardMaterial({
     roughness: 0.9,
@@ -200,6 +215,7 @@ export function updateFallingLeaves(dt: number, elapsedTime: number): void {
         p.y = surfaceY + LEAF_H / 2;
         p.rotX = (Math.random() - 0.5) * 0.12;
         p.rotZ = (Math.random() - 0.5) * 0.12;
+        if (isWater && waterLand) waterLand(p.x, p.z);
         p.state = isWater ? 'floating' : 'resting';
         p.timer = 1.8 + Math.random() * 2.2; // rest for 1.8 - 4 seconds
       }

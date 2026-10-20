@@ -27,6 +27,7 @@ import { updateClouds, cloudUniforms } from './clouds';
 import { initCoordinates, syncCoordinates } from './coordinates';
 import { createFallingLeaves, updateFallingLeaves } from './fallingLeaves';
 import { createAlgae, updateAlgae } from './algae';
+import { createSplash } from './splash';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -324,7 +325,15 @@ function main(): void {
   scene.add(water);
   scene.add(ocean);
 
-  const fallingLeaves = createFallingLeaves();
+  // Splashing.
+  //
+  // Created before the leaves, because a leaf that lands on the water rings
+  // it - a leaf is light enough that it does not throw any water up, but it
+  // does disturb the surface.
+  const splash = createSplash();
+  scene.add(splash.group);
+
+  const fallingLeaves = createFallingLeaves((x, z) => splash.ripple(x, z, 0.3));
   scene.add(fallingLeaves);
 
   // The algae on the seabed, under the water.
@@ -491,6 +500,9 @@ function main(): void {
     updatePlayer(player, dt);
     // after the player has moved, so the readout is this frame's position
     syncCoordinates(player.position);
+    // after the player, so it can see whether they landed this frame and how
+    // hard
+    splash.update(dt, player);
     sand.update(dt, player.position);
     updateWater(t);
     updateCamera(camera, player.position);
@@ -542,6 +554,7 @@ function main(): void {
       sand.update(dt, player.position);
       updateWater(t);
       updateTreeFade(player.position);
+      splash.update(dt, player);
     },
     // average ms per render call, bypassing rAF throttling in headless browsers
     __renderMs: (n = 20): number => {

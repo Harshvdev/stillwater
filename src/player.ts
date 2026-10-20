@@ -128,9 +128,42 @@ const move = new THREE.Vector3();
 let vy = 0;
 let grounded = true;
 
+// Whether the player is off the floor at the moment.
+//
+// This is not the same question as `grounded`, which is about the jump: a
+// player who walks off a ledge is `grounded` - nothing has set it false - and
+// is falling, and they must still land.
+//
+// It exists because "the player is at the floor" and "the player has just
+// ARRIVED at the floor" are different questions, and only the second one is
+// worth a splash. Testing the position alone reports a landing on every
+// frame of simply standing there.
+let airborne = false;
+
+/**
+ * What the player did this frame, for anything else in the scene that needs
+ * to react to it.
+ *
+ * The splash is the only reader at the moment, and it needs to know the
+ * difference between a player who stepped into the water and one who fell
+ * into it - which is the speed at the moment of landing, and there is no way
+ * to get that out of the position afterwards.
+ *
+ * Reset at the top of every update, so a reader that runs after
+ * updatePlayer sees one frame's worth and nothing stale.
+ */
+export const playerEvents = {
+  /** The player touched down this frame. */
+  landed: false,
+  /** How fast they were going down when they did, in world units a second. */
+  landSpeed: 0,
+};
+
 export function updatePlayer(player: THREE.Group, dt: number): void {
   const input = getMoveInput();
   const moving = input.x !== 0 || input.y !== 0;
+  playerEvents.landed = false;
+  playerEvents.landSpeed = 0;
   const ud = player.userData as {
     legL: THREE.Group; legR: THREE.Group; armL: THREE.Group; armR: THREE.Group;
   };
@@ -229,8 +262,22 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
     // integration happened to overshoot, so the feet never come to rest a
     // fraction inside a block - which would show up as the coordinate readout
     // sitting one lower than the block visibly underfoot.
+    //
+    // The speed at the moment of landing is reported, because how hard
+    // something lands is not something its position can tell you afterwards.
+    //
+    // Only when they have just ARRIVED, though: a player standing on the
+    // floor is at the floor on every frame, and reporting that as a landing
+    // every frame would splash them continuously.
+    if (airborne) {
+      playerEvents.landed = true;
+      playerEvents.landSpeed = -vy;
+    }
+    airborne = false;
     player.position.y = groundY;
     vy = 0;
     grounded = true;
+  } else {
+    airborne = true;
   }
 }

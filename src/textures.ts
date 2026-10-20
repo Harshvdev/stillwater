@@ -426,3 +426,64 @@ const algaeMasks: Partial<Record<AlgaeKind, THREE.DataTexture>> = {};
 export function algaeMask(kind: AlgaeKind): THREE.DataTexture {
   return (algaeMasks[kind] ??= makeBladeMask(ALGAE_PATTERNS[kind]));
 }
+
+// --------------------------------------------------------- splash ring
+//
+// The ring a splash leaves on the surface of the water.
+//
+// A thin crest rather than a filled disc, because a disc reads as a bright
+// patch of paint sitting on the sea and a crest reads as a disturbance in
+// it. It is drawn in the same chunky 16x16 idiom as everything else here, so
+// magnified out to a metre across it stays pixel art - a smooth ring would
+// be the one thing in the scene that is not.
+//
+// White with an alpha hole in the middle: the ring pixels are opaque and
+// everything inside them is not, so the middle of the quad shows the water
+// through it.
+
+const SPLASH_RING: readonly string[] = [
+  '................',
+  '................',
+  '.....######.....',
+  '...##......##...',
+  '..#..........#..',
+  '..#..........#..',
+  '.#............#.',
+  '.#............#.',
+  '.#............#.',
+  '.#............#.',
+  '.#............#.',
+  '.#............#.',
+  '..#..........#..',
+  '..#..........#..',
+  '...##......##...',
+  '.....######.....',
+];
+
+let splashRingTex: THREE.DataTexture | null = null;
+
+export function splashRing(): THREE.DataTexture {
+  if (splashRingTex) return splashRingTex;
+  const data = new Uint8Array(SPLASH_RING.length * SPLASH_RING.length * 4);
+  for (let y = 0; y < SPLASH_RING.length; y++) {
+    const row = SPLASH_RING[y];
+    for (let x = 0; x < row.length; x++) {
+      const i = (y * row.length + x) * 4;
+      const on = row[x] !== '.';
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      data[i + 3] = on ? 255 : 0;
+    }
+  }
+  const tex = new THREE.DataTexture(data, SPLASH_RING.length, SPLASH_RING.length, THREE.RGBAFormat);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  splashRingTex = tex;
+  return tex;
+}

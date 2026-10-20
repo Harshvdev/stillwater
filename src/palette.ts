@@ -106,6 +106,21 @@ export const PALETTE = {
   // water body, deep -> shallow
   water: [0x0b4f9e, 0x1176c4, 0x1aa8cc, 0x5fd6cc, 0xccebb8],
 
+  // Splashing water.
+  //
+  // The colour of the SEA, not white. A splash is the same water as the water
+  // it came out of, and it only looks white because it is broken up and
+  // catching the light everywhere at once. A white cube thrown out of a
+  // teal sea reads as snow.
+  //
+  // But pale, because a droplet is a tiny lens of water and a lens shows the
+  // sky. It is the shallow-water teal brightened almost to white - bright
+  // enough to stand out against the sea it was thrown out of, and still
+  // obviously the same water. Every splash in this scene happens over the
+  // shallows, which are already pale, so a droplet the same value as the
+  // water around it would be invisible.
+  splash: 0xd2f4ec,
+
   // Underwater plants.
   //
   // Cooler and darker than the land greens, and that is not a mood choice: an

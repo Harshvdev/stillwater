@@ -300,12 +300,19 @@ export function voxelMaterial(opts: {
     metalness: opts.metal ?? 0,
     // Only the water is transparent, and it is the only surface in the scene
     // with something behind it worth seeing - the seabed under the shallows.
-    //
-    // depthWrite stays on. The water writes its own depth, so the sea surface
-    // occludes what is behind it rather than blending with it, and the only
-    // transparent object in the scene is the sea itself - there is nothing for
-    // it to be sorted against.
     transparent: instAlpha,
+    // And it does not write depth.
+    //
+    // The sea is one flat sheet of coplanar quads, so it has no self-overlap
+    // and nothing is lost by it not writing depth: it still depth-TESTS, so
+    // terrain in front of it still hides it.
+    //
+    // What it buys is the splash. A splash is drawn in the transparent queue
+    // after the sea, and if the sea wrote depth then the water in front of a
+    // splash would own those pixels and the splash would be blended away by
+    // it - a splash seen through a sheet of water instead of sitting on top
+    // of it. Not writing depth lets the splash keep its pixels.
+    depthWrite: !instAlpha,
   });
   // every variant compiles from one onBeforeCompile source, so the cache key has
   // to name exactly which combination this material is
