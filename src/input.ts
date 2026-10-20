@@ -1,5 +1,22 @@
 const keys = new Set<string>();
 
+// Whether the movement keys are suspended.
+//
+// The backpack is a menu, and a menu takes the keyboard. With the backpack
+// open, W would walk the player into the sea while they are trying to look
+// at their collection - so the keys that move the player are read as
+// released while it is up.
+//
+// This is a flag rather than a check at each use because the keys are read in
+// three places - the movement input, the jump and the dive - and a menu that
+// only swallowed one of them would be worse than none.
+let suspended = false;
+
+/** Suspend or resume the movement keys. */
+export function setInputSuspended(on: boolean): void {
+  suspended = on;
+}
+
 export function initInput(): void {
   window.addEventListener('keydown', (e) => {
     // Space scrolls the page, and this page is one full-window canvas with
@@ -33,7 +50,7 @@ export function initInput(): void {
  * because the rate is bounded by the landing, not by the keyboard.
  */
 export function isJumpHeld(): boolean {
-  return keys.has('Space');
+  return !suspended && keys.has('Space');
 }
 
 /**
@@ -48,11 +65,12 @@ export function isJumpHeld(): boolean {
  * than a press.
  */
 export function isDiveHeld(): boolean {
-  return keys.has('ShiftLeft') || keys.has('ShiftRight');
+  return !suspended && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
 }
 
 // returns movement intent in screen space: x right, y up
 export function getMoveInput(): { x: number; y: number } {
+  if (suspended) return { x: 0, y: 0 };
   let x = 0;
   let y = 0;
   if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;

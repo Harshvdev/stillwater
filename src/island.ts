@@ -1027,6 +1027,13 @@ gl_Position = projectionMatrix * mvPosition;`
 //
 // Six sub-cubes per flower means six instances, which is why the sub-meshes are
 // built to the number of flowers rather than to a cell count.
+
+// The flower's three kinds, as the roll chooses them. They are named because
+// the inventory's icons are the flowers themselves.
+export const FLOWER_WHITE = 0;
+export const FLOWER_YELLOW = 1;
+export const FLOWER_PINK = 2;
+
 export function createFlowers(): THREE.Group {
   const group = new THREE.Group();
 

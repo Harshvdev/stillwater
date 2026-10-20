@@ -28,6 +28,7 @@ import { initCoordinates, syncCoordinates } from './coordinates';
 import { createFallingLeaves, updateFallingLeaves } from './fallingLeaves';
 import { createAlgae, updateAlgae } from './algae';
 import { createSplash } from './splash';
+import { initInventory } from './inventory';
 
 // The scene renders into a small buffer and CSS scales the canvas up with
 // nearest-neighbour, so smooth world motion lands on pixel steps - the GBA look.
@@ -428,12 +429,17 @@ function main(): void {
 
   const sand = createSandDeform();
 
-  initInput();
-  // TEMPORARY: builds the debug sidebar. See the imports at the top.
+  // The inventory: a hotbar down the left of the screen and a backpack that
+  // opens on E.
+  initInput();  // TEMPORARY: builds the debug sidebar. See the imports at the top.
   const sb = initSidebar();
   initDaySlider(sb.sections.day);
   initCloudSlider(sb.sections.cloud);
   initCoordinates();
+
+  // The inventory. The panel and the slots; there is nothing in the world to
+  // put in them yet.
+  initInventory();
 
   /**
    * Push the solved time of day onto the lights and the fog.
