@@ -125,12 +125,11 @@ function limb(w: number, h: number, d: number, color: number, x: number, y: numb
   return g;
 }
 
-// Four-frame walk cycle held on 8 fps frames: apart, together, apart, together.
-const SWING = [0.62, 0, -0.62, 0];
-const BOB = [0.07, 0, 0.07, 0];
+// Smooth walk cycle: harmonic sine wave oscillation tuned to walking speed
+const WALK_SPEED_FREQ = 12;
+const MAX_SWING = 0.62;
 
 let walkTime = 0;
-let walkFrame = 0;
 
 export function createPlayer(): THREE.Group {
   const g = new THREE.Group();
@@ -323,23 +322,16 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
     player.rotation.y = snapped;
 
     walkTime += dt;
-    walkFrame = Math.floor(walkTime * 8) % 4;
   } else {
-    // settle back to a neutral stance
-    const ease = Math.max(0, 1 - dt * 14);
-    ud.legL.rotation.x *= ease;
-    ud.legR.rotation.x *= ease;
-    ud.armL.rotation.x *= ease;
-    ud.armR.rotation.x *= ease;
-    walkFrame = 0;
+    walkTime = 0;
   }
 
-  const swing = moving ? SWING[walkFrame] : 0;
-  const bob = moving ? BOB[walkFrame] : 0;
-  ud.legL.rotation.x = swing;
-  ud.legR.rotation.x = -swing;
-  ud.armL.rotation.x = -swing * 0.8;
-  ud.armR.rotation.x = swing * 0.8;
+  const swing = moving ? Math.sin(walkTime * WALK_SPEED_FREQ) * MAX_SWING : 0;
+  const blend = Math.min(1, dt * 18);
+  ud.legL.rotation.x = THREE.MathUtils.lerp(ud.legL.rotation.x, swing, blend);
+  ud.legR.rotation.x = THREE.MathUtils.lerp(ud.legR.rotation.x, -swing, blend);
+  ud.armL.rotation.x = THREE.MathUtils.lerp(ud.armL.rotation.x, -swing * 0.8, blend);
+  ud.armR.rotation.x = THREE.MathUtils.lerp(ud.armR.rotation.x, swing * 0.8, blend);
 
   // A swimmer does not walk.
   //
