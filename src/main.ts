@@ -3,9 +3,12 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { createIsland, createFlowers, createTallGrass, levelAtWorld, VOXEL, SEA_Y } from './island';
 import { createWater, updateWater } from './water';
 import { createTrees, updateTreeFade, treeLocations } from './trees';
+import { createCampfire } from './campfire';
+import { CAMPFIRE_X, CAMPFIRE_Z } from './constants';
 import { createPlayer, updatePlayer } from './player';
 import { createSandDeform } from './sandDeform';
 import { initInput } from './input';
@@ -130,6 +133,53 @@ function main(): void {
   });
   const composer = new EffectComposer(renderer, composerTarget);
   composer.addPass(new RenderPass(scene, camera));
+
+  // ------------------------------------------------------ contact shadows
+  //
+  // A directional light above a short object casts its shadow underneath it,
+  // which is to say it casts no visible shadow at all. At noon the campfire is
+  // four tenths of a block tall and the sun is forty degrees up, so its shadow
+  // is a stub hidden by the pile itself - physically correct, and the reason a
+  // real pile of logs on real grass still reads as planted while this one read
+  // as pasted on.
+  //
+  // What grounds it in reality is occlusion, not shadow: the grass at the foot
+  // of the logs sees less of the sky than open grass does, so it is darker.
+  // That is ambient occlusion, and GTAO computes it from the actual depth and
+  // normals of the frame - no decal, no blob, no per-object special case. It
+  // darkens every crease in the scene for the same reason: the player's feet,
+  // the tree trunks, the block seams.
+  //
+  // It runs before bloom so the AO is in the HDR buffer the bloom threshold
+  // reads, and before OutputPass so it is tone mapped with everything else.
+  const gtao = new GTAOPass(scene, camera, 1, 1);
+  // Ensure the blend shader never produces negative values or overshoots 1.0.
+  // When blendIntensity > 1, strong occlusion (texel < 0.44) would otherwise
+  // produce negative RGB in the half-float render target, which tone mapping
+  // inverts into purple/magenta pixelated artifacts in deep creases (e.g. around player feet).
+  gtao.blendMaterial.fragmentShader = gtao.blendMaterial.fragmentShader.replace(
+    'gl_FragColor = vec4(mix(vec3(1.), texel.rgb, intensity), texel.a);',
+    'gl_FragColor = vec4(clamp(mix(vec3(1.), texel.rgb, intensity), 0.0, 1.0), texel.a);'
+  );
+  // World-space reach. A little under a voxel: far enough to catch the ground
+  // under a log or a player's boot, short enough not to paint a grey halo
+  // around whole trees. The blend is pushed past 1 because the sky fill here is
+  // a large share of the light - an honest AO term of 0.7 only darkens the
+  // frame by a tenth, which is not enough to read as contact.
+  gtao.updateGtaoMaterial({
+    radius: 0.8,
+    distanceExponent: 1.4,
+    thickness: 1.2,
+    scale: 1.0,
+    samples: 16,
+    distanceFallOff: 1.0,
+  });
+  // Denoise strength. The pass's Poisson filter trades a little contact
+  // definition for not shimmering as the camera moves; at this world scale a
+  // crisp AO edge would be the one aliased thing in a pixel-art frame.
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 8, rings: 2, samples: 16 });
+  gtao.blendIntensity = 1.6;
+  composer.addPass(gtao);
 
   // Runs in linear HDR, before OutputPass tone maps, so this threshold is
   // chosen against measured linear values rather than against what anything
@@ -317,10 +367,14 @@ function main(): void {
   const trees = createTrees();
   const flowers = createFlowers();
   const tallGrass = createTallGrass(treeLocations);
+  // After the island: the fire reads the terrain's solved level grid to sit
+  // itself on the ground, and that grid is only filled in by createIsland.
+  const campfire = createCampfire();
   scene.add(island);
   scene.add(trees);
   scene.add(flowers);
   scene.add(tallGrass);
+  scene.add(campfire.group);
 
   const { mesh: water, ocean } = createWater();
   scene.add(water);
@@ -402,8 +456,20 @@ function main(): void {
   });
 
   const player = createPlayer();
-  // drop the player onto the island rather than at a fixed height
-  player.position.set(0, levelAtWorld(0, 0) * VOXEL, 0);
+  // Drop the player onto the island rather than at a fixed height - beside the
+  // campfire, not on top of it.
+  //
+  // The spawn sits off the camera's own diagonal, not on it. Standing at
+  // (+2.6, +2.6) put the player directly between the lens and the fire, so the
+  // first thing the game showed was a back and the fire was a glow behind it.
+  // Moving round to (+2.6, -1.6) puts the player to the fire's right, which is
+  // where the camera is already looking from: both are in frame, side by side,
+  // and the fire's light has a body to fall on.
+  player.position.set(
+    CAMPFIRE_X + 2.6,
+    levelAtWorld(CAMPFIRE_X + 2.6, CAMPFIRE_Z - 1.6) * VOXEL,
+    CAMPFIRE_Z - 1.6
+  );
   // The player casts now. There used to be a hand-placed translucent quad for
   // this because nothing else in the scene cast; with the sun's shadow map
   // doing real work, a real shadow is both cheaper to maintain and correctly
@@ -499,6 +565,9 @@ function main(): void {
     // The current under the water is its own thing, but it runs on the same
     // clock as everything else.
     updateAlgae(t);
+    // The fire: frame swap, flicker, embers. Driven from the same clock, so the
+    // flame and the light it casts never disagree about what frame it is.
+    campfire.update(dt, t);
     // TEMPORARY: keeps the debug sidebar reading live state. See the imports
     // above.
     syncDaySlider();
@@ -526,10 +595,11 @@ function main(): void {
   Object.assign(window as unknown as Record<string, unknown>, {
     __seaY: SEA_Y,
     __groundHeight: (x: number, z: number) => levelAtWorld(x, z) * VOXEL,
-    __three: { renderer, scene, camera, composer, bloom, sun, moon, hemi },
+    __three: { renderer, scene, camera, composer, bloom, gtao, sun, moon, hemi },
     __clouds: cloudUniforms,
     __updateWater: updateWater,
     __player: player,
+    __campfire: campfire,
     // one camera step against the live player, so the on-screen follow path can
     // be measured exactly without depending on rAF timing
     __updateCamera: (): void => {
@@ -556,6 +626,7 @@ function main(): void {
       updateClouds(dt, t, Math.max(sun.intensity, moon.intensity));
       updateFallingLeaves(dt, t);
       updateAlgae(t);
+      campfire.update(dt, t);
       updatePlayer(player, dt);
       sand.update(dt, player.position);
       updateWater(t);

@@ -138,6 +138,39 @@ export const PALETTE = {
   hair: [0x4a3324, 0x35241a],
   cap: [0xe8564a, 0xf2f0e6],
   eye: 0x2a1e14,
+
+  // The campfire.
+  //
+  // Its logs are the trees' own oak, burnt: the bark ramp pulled down and
+  // desaturated, because charred wood loses the warm brown it started with
+  // before it loses its shape. Kept as a ramp rather than one colour for the
+  // same reason as the bark - a pile of four logs of identical shade reads as a
+  // single extruded block.
+  campfireLog: [0x8a6746, 0x76563a, 0x64462e],
+  // The upward face of a log. In Minecraft's campfire the logs lie on their
+  // sides, so the face you look down on is still bark - scorched, a shade darker
+  // than the outside, but wood and not charcoal. That matters more than it
+  // sounds: from this camera the tops are most of the pile, and tops painted
+  // with the char ramp turned the whole campfire into a black square sitting on
+  // the grass. The char belongs in the seams, which is where it is.
+  campfireTop: [0x745538, 0x62462e, 0x513926],
+  // The bed between the bottom logs, burnt all the way through.
+  campfireChar: [0x3a2a1e, 0x2e2117, 0x241a12],
+
+  // The flame. Five tones, hot to cold, which is all a 16x16 fire needs: the
+  // whole sprite is a silhouette plus a temperature gradient, and every extra
+  // tone past this just greys the gradient out.
+  //
+  // The core is deliberately not white-white. Neutral white under the tone curve
+  // is a dead pixel at the centre of the fire; the faintest yellow keeps it
+  // reading as the hottest part of a flame rather than as a hole.
+  flame: {
+    core: 0xfff8e0,
+    hot: 0xffd257,
+    mid: 0xf59327,
+    low: 0xd2521c,
+    ember: 0x8f2a10,
+  },
 } as const;
 
 // The baked face-shade table is gone. It used to multiply every face in the

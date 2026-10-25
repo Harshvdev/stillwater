@@ -3,6 +3,7 @@ import {
   VOXEL, GRID, REGION_HALF, LEVEL_GRASS, levelAtWorld, voxelMaterial, coastRadius, WIDTH_SCALE,
 } from './island';
 import { PALETTE, pick } from './palette';
+import { CAMPFIRE_X, CAMPFIRE_Z, CAMPFIRE_TREE_CLEARING } from './constants';
 
 // Trees, Minecraft style: a bare square log column with a solid cube canopy
 // sitting on top, the way an oak reads at a glance. Everything is built from
@@ -315,6 +316,13 @@ export function createTrees(): THREE.Group {
 
       // grass and up only: no trees on the beach or in the shallows
       if (levelAtWorld(x, z) < LEVEL_GRASS) continue;
+
+      // The campfire's clearing. Wider than the meadow's, because it is the
+      // CANOPY that has to stay out of the fire, not the trunk: a five-voxel
+      // canopy hangs two and a half voxels out from its trunk in every
+      // direction, so a trunk at three units would still be dropping leaves
+      // into the flames.
+      if (Math.hypot(x - CAMPFIRE_X, z - CAMPFIRE_Z) < CAMPFIRE_TREE_CLEARING) continue;
 
       // scattered singly, thinner toward the middle
       const rad = normRadius(x, z);

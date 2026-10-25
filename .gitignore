@@ -3,6 +3,7 @@ dist/
 .playwright-mcp/
 references/
 /screenshots/
+/misc/
 *.log
 .DS_Store
 .idea/

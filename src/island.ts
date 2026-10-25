@@ -4,6 +4,7 @@ import { PALETTE, pick } from './palette';
 import { blockTexture, grassMask } from './textures';
 import { applyCloudShadows } from './clouds';
 import { windUniforms } from './wind';
+import { CAMPFIRE_X, CAMPFIRE_Z, CAMPFIRE_CLEARING } from './constants';
 
 // ---------------------------------------------------------------- coast port
 // Verbatim from the 3d original, so the island silhouette is identical.
@@ -1101,6 +1102,12 @@ export function createFlowers(): THREE.Group {
       // grass rim and up; LEVEL_BEACH is the old hardcoded 2
       if (levels[j * GRID + i] < LEVEL_GRASS) continue;
 
+      // The campfire's clearing. Checked before the drift mask so the fire's
+      // ground is cleared regardless of which way the flower drifts happen to
+      // run - a drift is a low-frequency mask, so without this the clearing
+      // would be a ragged bite out of one and a clean edge against another.
+      if (Math.hypot(cellX(i) - CAMPFIRE_X, cellZ(j) - CAMPFIRE_Z) < CAMPFIRE_CLEARING) continue;
+
       // WHERE flowers are allowed to grow: a low-frequency mask, sampled per
       // cell, so they clump into drifts instead of dusting the whole meadow.
       // This part is unchanged from the speck version and worth keeping exactly
@@ -1250,8 +1257,14 @@ export function createTallGrass(treeLocs: readonly { x: number; z: number }[] = 
       new Float32Array(MAX_TALL_GRASS * spec.cards * 3), 3
     );
     mesh.frustumCulled = false;
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
+    mesh.onBeforeRender = (_r, _s, _c, geometry, material): void => {
+      if (material !== mesh.material) geometry.setDrawRange(0, 0);
+    };
+    mesh.onAfterRender = (_r, _s, _c, geometry): void => {
+      geometry.setDrawRange(0, Infinity);
+    };
     group.add(mesh);
     return { mesh, spec, kind, n: 0 };
   });
@@ -1312,6 +1325,10 @@ export function createTallGrass(treeLocs: readonly { x: number; z: number }[] = 
 
       // Must be on grass surface, NEVER on sand or water!
       if (cellLevel < LEVEL_GRASS || groundHeight(baseX, baseZ) <= GRASS_H) continue;
+
+      // The campfire's clearing, same radius the flowers use. A tuft standing in
+      // the fire would be a tuft on fire, and there is no burning in this game.
+      if (Math.hypot(baseX - CAMPFIRE_X, baseZ - CAMPFIRE_Z) < CAMPFIRE_CLEARING) continue;
 
       // Tree proximity bonus
       let nearTree = false;

@@ -316,6 +316,13 @@ export function createAlgae(): THREE.Group {
       new Float32Array(MAX_ALGAE * spec.cards * 3), 3
     );
     mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.onBeforeRender = (_r, _s, _c, geometry, material): void => {
+      if (material !== mesh.material) geometry.setDrawRange(0, 0);
+    };
+    mesh.onAfterRender = (_r, _s, _c, geometry): void => {
+      geometry.setDrawRange(0, Infinity);
+    };
     group.add(mesh);
     return { mesh, spec, kind, n: 0 };
   });

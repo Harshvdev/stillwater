@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PALETTE } from './palette';
 
 // Block textures.
 //
@@ -425,6 +426,258 @@ const algaeMasks: Partial<Record<AlgaeKind, THREE.DataTexture>> = {};
 
 export function algaeMask(kind: AlgaeKind): THREE.DataTexture {
   return (algaeMasks[kind] ??= makeBladeMask(ALGAE_PATTERNS[kind]));
+}
+
+// --------------------------------------------------------- campfire flame
+//
+// The one thing in the scene that is drawn as a sprite rather than as voxels,
+// and that is not a shortcut: Minecraft's campfire flame is exactly this, two
+// crossed alpha-cutout planes carrying an animated 16x16 fire texture. Building
+// it out of cubes instead would give a lumpy orange lump, because a flame's
+// whole character is its silhouette and a cube has no silhouette to speak of.
+//
+// Only the SILHOUETTE is drawn by hand. The colour inside it is solved, pixel by
+// pixel, from where that pixel sits in the fire:
+//
+//   - the fuel end is hot and the tips are cold, because that is the direction
+//     heat flows in a flame; a fire that is brightest at its tips is the single
+//     most common way a pixel fire reads as wrong,
+//   - a hot core sits low and a touch off centre, where the flame is thickest,
+//   - anything on the outline drops more than a tone, which draws the dark red
+//     rim that gives the fire its edge against the sky,
+//   - a little deterministic noise breaks up the bands, so the gradient does not
+//     read as concentric rings.
+//
+// The split matters because a flame is mostly silhouette: get the outline right
+// and almost any sane gradient inside it reads as fire. Six hand-drawn outlines
+// with solved colour is therefore both less work and more controllable than
+// hand-picking 256 pixels six times over.
+//
+// The silhouettes are lopsided on purpose, and their widths do NOT rise evenly
+// from tip to base. A symmetric teardrop is what a fire looks like in a diagram,
+// not in a fireplace: a real one leans, bulges at the shoulder, pinches, forks,
+// and throws the odd detached tongue off its side. A silhouette whose row widths
+// step up by one every row is a cone with a flame's colour on it, and that is
+// exactly what the first pass of this sprite looked like. So each frame below
+// was drawn as a left edge and a right edge that move independently, and each
+// one has at least one row that is narrower than the row above it.
+//
+// Six frames rather than Minecraft's thirty-two. At the dozen rendered pixels
+// this sprite gets, the eye reads the change in silhouette between frames and
+// nothing else.
+
+const FLAME_FRAMES: readonly (readonly string[])[] = [
+  // tall, leaning right, heavy right shoulder
+  [
+    '................',
+    '.........#......',
+    '........###.....',
+    '........###.....',
+    '.......#####....',
+    '.......####.....',
+    '......######....',
+    '......#######...',
+    '.....########...',
+    '....#########...',
+    '....##########..',
+    '...###########..',
+    '...############.',
+    '....##########..',
+    '....##########..',
+    '...############.',
+  ],
+  // broad and low, forked at the top, weight to the left
+  [
+    '................',
+    '................',
+    '......#.#.......',
+    '.....##.##......',
+    '....######......',
+    '....#######.....',
+    '...########.....',
+    '...#########....',
+    '..##########....',
+    '..###########...',
+    '..##########....',
+    '.############...',
+    '.#############..',
+    '..############..',
+    '..###########...',
+    '.#############..',
+  ],
+  // the dip: squat and very wide, a mound more than a tongue
+  [
+    '................',
+    '.......#........',
+    '......###.......',
+    '.......##.......',
+    '......####......',
+    '.....######.....',
+    '....#########...',
+    '...##########...',
+    '..############..',
+    '..############..',
+    '...##########...',
+    '..############..',
+    '.##############.',
+    '.##############.',
+    '..############..',
+    '.##############.',
+  ],
+  // tall and narrow, leaning left, a thin tongue
+  [
+    '................',
+    '......#.........',
+    '......#.........',
+    '.....###........',
+    '.....####.......',
+    '....#####.......',
+    '....######......',
+    '...#######......',
+    '...######.......',
+    '..#########.....',
+    '..########......',
+    '..##########....',
+    '.###########....',
+    '..##########....',
+    '..###########...',
+    '.############...',
+  ],
+  // leaning right, a detached spark off the right shoulder
+  [
+    '................',
+    '................',
+    '.........#......',
+    '........###.....',
+    '........####....',
+    '.......#####.#..',
+    '......#######...',
+    '......#######...',
+    '.....#########..',
+    '....##########..',
+    '....##########..',
+    '...############.',
+    '...############.',
+    '....###########.',
+    '....##########..',
+    '...############.',
+  ],
+  // notched: the right edge steps in and back out on the way down
+  [
+    '................',
+    '.......#........',
+    '......###.......',
+    '......####......',
+    '.....#####......',
+    '.....######.....',
+    '....#######.....',
+    '....########....',
+    '...#########....',
+    '...########.....',
+    '....########....',
+    '...##########...',
+    '..###########...',
+    '..############..',
+    '...##########...',
+    '..############..',
+  ],
+];
+
+// The five flame tones, coldest first. `rank` is a continuous 0..4 temperature
+// that gets rounded into this table, so the gradient inside the silhouette is
+// solved rather than authored.
+const FLAME_RAMP: readonly number[] = [
+  PALETTE.flame.ember,
+  PALETTE.flame.low,
+  PALETTE.flame.mid,
+  PALETTE.flame.hot,
+  PALETTE.flame.core,
+];
+
+/**
+ * True if (x, y) is a solid pixel with a transparent 4-neighbour.
+ *
+ * Only the four cardinal neighbours count. Diagonal-only contact still reads as
+ * the outline of the shape, and including diagonals would darken the inside of
+ * every one-pixel tip twice over.
+ */
+function onFlameEdge(rows: readonly string[], x: number, y: number): boolean {
+  const solid = (px: number, py: number): boolean =>
+    py >= 0 && py < rows.length && px >= 0 && px < rows.length && rows[py][px] === '#';
+  return !solid(x - 1, y) || !solid(x + 1, y) || !solid(x, y - 1) || !solid(x, y + 1);
+}
+
+const flameCache: THREE.DataTexture[] = [];
+
+/**
+ * The campfire's animation frames, built once and shared.
+ *
+ * Row 0 of the authored array is the top of the flame and row 15 the base, but a
+ * DataTexture's first row is v=0, which is the bottom of a plane - so the rows
+ * are written in reverse, the same flip the grass masks make.
+ */
+export function flameFrames(): THREE.DataTexture[] {
+  if (flameCache.length > 0) return flameCache;
+
+  FLAME_FRAMES.forEach((rows, frame) => {
+    const size = rows.length;
+    const data = new Uint8Array(size * size * 4);
+
+    for (let y = 0; y < size; y++) {
+      // `row` is the authored row, counting down from the tip to the fuel
+      const row = size - 1 - y;
+      const line = rows[row];
+
+      for (let x = 0; x < size; x++) {
+        if (line[x] !== '#') continue;
+
+        // 1. temperature rises toward the fuel. 1.5 at the tip, 3.0 at the base,
+        //    before any of the terms below push it either way. That is a narrow
+        //    band on purpose: most of the flame should land on orange-to-yellow,
+        //    because that is what a fire actually is - a big orange body with a
+        //    small white heart and a thin red edge. A wide ramp spends half the
+        //    sprite on white and the fire reads as a lamp.
+        let rank = 1.5 + (row / (size - 1)) * 1.5;
+
+        // 2. the hot core: a small ellipse low in the fire, a touch right of
+        //    centre, where the fuel is. This is the white-yellow heart, and it
+        //    is deliberately narrow - three texels across at most. A wide core
+        //    is what turns a pixel flame into a white blob once bloom gets it.
+        const dx = (x - 7.6) / 1.6;
+        const dy = (row - 13.2) / 1.6;
+        rank += Math.max(0, 1 - (dx * dx + dy * dy)) * 0.8;
+
+        // 3. the rim cools, by more than a tone. This is the dark red outline,
+        //    and it does the job a stroke would do in a drawing: it separates
+        //    fire from background. It has to be this hard a step - a gentle one
+        //    just softens the edge, and a soft edge is not what pixel art is.
+        if (onFlameEdge(rows, x, row)) rank -= 1.2;
+
+        // 4. noise, so the bands are not clean contours. Seeded by the frame, so
+        //    the grain travels with the shape instead of sitting still under it.
+        rank += (hash2(x, row, 17 + frame) - 0.5) * 0.6;
+
+        const tone = FLAME_RAMP[Math.max(0, Math.min(4, Math.round(rank)))];
+        const i = (y * size + x) * 4;
+        data[i] = (tone >> 16) & 0xff;
+        data[i + 1] = (tone >> 8) & 0xff;
+        data[i + 2] = tone & 0xff;
+        data[i + 3] = 255;
+      }
+    }
+
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    flameCache.push(tex);
+  });
+
+  return flameCache;
 }
 
 // --------------------------------------------------------- splash ring

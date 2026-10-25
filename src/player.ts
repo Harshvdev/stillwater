@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VOXEL, SEA_Y, levelAtWorld } from './island';
 import { getMoveInput, isJumpHeld, isDiveHeld } from './input';
 import { treeBlocks } from './trees';
+import { campfireBlocks } from './campfire';
 import { PALETTE } from './palette';
 import { applyCloudShadows } from './clouds';
 
@@ -280,6 +281,11 @@ export function updatePlayer(player: THREE.Group, dt: number): void {
       // slide into a trunk on the way to a legal step. The canopy is well
       // above head height and does not block.
       if (treeBlocks(x, z, FOOT_R)) return false;
+      // so is the campfire. It is only knee high, but this game has no notion of
+      // standing on an object - collision is terrain level plus trunks - so the
+      // honest choice is a solid obstacle rather than letting a body walk into
+      // the flames.
+      if (campfireBlocks(x, z, FOOT_R)) return false;
       const targetY = surfaceLevel(x, z) * VOXEL;
       // Too tall a step to climb, measured against the CURRENT height rather
       // than the ground - so being part-way up a jump counts. This is what
