@@ -96,10 +96,9 @@ const LIGHT_DISTANCE = 9;
 // skirt as well would just smear the whole fire into a blob.
 const FLAME_GAIN = 2.0;
 
-// Animation. Minecraft's campfire fire is a 32-frame loop; six is enough for a
-// flame this size, because at a dozen rendered pixels the eye reads the change
-// in silhouette, not the in-between frames.
-const FRAME_FPS = 9;
+// Animation: Minecraft's 32-frame campfire loop played at 12 fps (~2.67s cycle),
+// giving an organic, continuous convection cycle rather than a rapid repeat.
+const FRAME_FPS = 12;
 
 export interface Campfire {
   group: THREE.Group;
